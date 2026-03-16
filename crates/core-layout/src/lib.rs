@@ -125,6 +125,14 @@ impl WorkspaceLayout {
         Ok(())
     }
 
+    pub fn focus_pane(&mut self, pane_id: &str) -> Result<(), LayoutError> {
+        if !self.panes.iter().any(|p| p.pane_id == pane_id) {
+            return Err(LayoutError::PaneNotFound);
+        }
+        self.focused_pane_id = pane_id.to_string();
+        Ok(())
+    }
+
     pub fn close_pane(&mut self, pane_id: &str) -> Result<(), LayoutError> {
         if self.panes.len() <= 1 {
             return Err(LayoutError::WouldEmptyWorkspace);
@@ -219,6 +227,27 @@ mod tests {
     }
 
     #[test]
+    fn focusing_an_existing_pane_updates_focus() {
+        let mut layout = WorkspaceLayout::starter();
+        layout
+            .split_pane("pane-1", "pane-2", SplitOrientation::Vertical, 0.5)
+            .expect("split should work");
+
+        layout.focus_pane("pane-1").expect("existing pane should focus");
+
+        assert_eq!(layout.focused_pane_id, "pane-1");
+    }
+
+    #[test]
+    fn focusing_a_missing_pane_is_rejected() {
+        let mut layout = WorkspaceLayout::starter();
+
+        let err = layout.focus_pane("pane-missing");
+
+        assert!(matches!(err, Err(LayoutError::PaneNotFound)));
+    }
+
+    #[test]
     fn closing_a_focused_pane_rebalances_and_moves_focus_to_a_neighbor() {
         let mut layout = WorkspaceLayout::starter();
         layout
@@ -240,6 +269,32 @@ mod tests {
                 .map(|pane| pane.pane_id.as_str())
                 .collect::<Vec<_>>(),
             vec!["pane-1", "pane-2"]
+        );
+    }
+
+    #[test]
+    fn closing_a_non_focused_pane_keeps_current_focus() {
+        let mut layout = WorkspaceLayout::starter();
+        layout
+            .split_pane("pane-1", "pane-2", SplitOrientation::Vertical, 0.5)
+            .expect("first split should work");
+        layout
+            .split_pane("pane-2", "pane-3", SplitOrientation::Horizontal, 0.5)
+            .expect("second split should work");
+
+        layout.focus_pane("pane-3").expect("pane-3 should focus");
+        layout
+            .close_pane("pane-1")
+            .expect("non-focused pane should close");
+
+        assert_eq!(layout.focused_pane_id, "pane-3");
+        assert_eq!(
+            layout
+                .panes
+                .iter()
+                .map(|pane| pane.pane_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["pane-2", "pane-3"]
         );
     }
 

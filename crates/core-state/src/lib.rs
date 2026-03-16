@@ -239,6 +239,21 @@ impl WorkspaceRegistry {
         ws.layout.close_pane(pane_id)?;
         Ok(())
     }
+
+    pub fn focus_pane(
+        &mut self,
+        workspace_id: &str,
+        pane_id: &str,
+    ) -> Result<(), WorkspaceError> {
+        let ws = self
+            .workspaces
+            .iter_mut()
+            .find(|w| w.id == workspace_id)
+            .ok_or(WorkspaceError::WorkspaceNotFound)?;
+
+        ws.layout.focus_pane(pane_id)?;
+        Ok(())
+    }
 }
 
 impl WorkspaceRecord {
@@ -428,6 +443,31 @@ mod tests {
             err,
             WorkspaceError::Layout(LayoutError::WouldEmptyWorkspace)
         );
+    }
+
+    #[test]
+    fn focus_pane_delegates_to_layout_and_updates_summary() {
+        let mut reg = make_registry_with_two();
+        reg.split_pane("ws-b", "pane-1", "pane-2", SplitOrientation::Vertical, 0.5)
+            .expect("split should work");
+
+        reg.focus_pane("ws-b", "pane-1").expect("focus should work");
+
+        let focused = reg
+            .summaries()
+            .into_iter()
+            .find(|workspace| workspace.id == "ws-b")
+            .unwrap();
+        assert_eq!(focused.focused_pane_id, "pane-1");
+    }
+
+    #[test]
+    fn focus_pane_on_unknown_workspace_returns_workspace_not_found() {
+        let mut reg = make_registry_with_two();
+
+        let err = reg.focus_pane("ws-missing", "pane-1").unwrap_err();
+
+        assert_eq!(err, WorkspaceError::WorkspaceNotFound);
     }
 
     #[test]

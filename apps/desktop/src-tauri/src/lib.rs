@@ -233,6 +233,56 @@ fn pane_split(
 }
 
 #[tauri::command]
+fn pane_focus(
+    workspace_id: String,
+    pane_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let request = RequestEnvelope::new(
+        "desktop-pane-focus",
+        "pane.focus",
+        json!({
+            "workspaceId": workspace_id,
+            "paneId": pane_id,
+        }),
+    );
+    let response = dispatch_runtime_request(&request, &mut state.runtime.lock().unwrap());
+    if response.is_ok() {
+        Ok(())
+    } else {
+        Err(response
+            .error()
+            .map(|error| error.message.clone())
+            .unwrap_or_else(|| "pane focus failed".to_string()))
+    }
+}
+
+#[tauri::command]
+fn pane_close(
+    workspace_id: String,
+    pane_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let request = RequestEnvelope::new(
+        "desktop-pane-close",
+        "pane.close",
+        json!({
+            "workspaceId": workspace_id,
+            "paneId": pane_id,
+        }),
+    );
+    let response = dispatch_runtime_request(&request, &mut state.runtime.lock().unwrap());
+    if response.is_ok() {
+        Ok(())
+    } else {
+        Err(response
+            .error()
+            .map(|error| error.message.clone())
+            .unwrap_or_else(|| "pane close failed".to_string()))
+    }
+}
+
+#[tauri::command]
 fn session_send_input(
     session_id: String,
     input: String,
@@ -362,6 +412,8 @@ where
     match request.command() {
         "workspace.create" => handle_workspace_create(request, runtime),
         "pane.split" => handle_pane_split(request, runtime),
+        "pane.focus" => handle_pane_focus(request, runtime),
+        "pane.close" => handle_pane_close(request, runtime),
         "session.start" => handle_session_start(request, runtime),
         "session.sendInput" => handle_session_send_input(request, runtime),
         "session.resize" => handle_session_resize(request, runtime),
@@ -370,6 +422,40 @@ where
         "app.getState" => handle_app_get_state(request, runtime),
         _ => core_ipc::dispatch(request, &mut runtime.registry),
     }
+}
+
+fn handle_pane_focus<F>(
+    request: &RequestEnvelope,
+    runtime: &mut RuntimeState<F>,
+) -> ResponseEnvelope
+where
+    F: SessionHostFactory,
+{
+    core_ipc::dispatch(request, &mut runtime.registry)
+}
+
+fn handle_pane_close<F>(
+    request: &RequestEnvelope,
+    runtime: &mut RuntimeState<F>,
+) -> ResponseEnvelope
+where
+    F: SessionHostFactory,
+{
+    let payload = request.payload();
+    let workspace_id = payload["workspaceId"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    let pane_id = payload["paneId"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+
+    let response = core_ipc::dispatch(request, &mut runtime.registry);
+    if response.is_ok() {
+        runtime.sessions.remove_pane(&workspace_id, &pane_id);
+    }
+    response
 }
 
 fn handle_runtime_request<F>(input: &str, runtime: &mut RuntimeState<F>) -> String
@@ -808,6 +894,8 @@ pub fn run() {
             desktop_bootstrap,
             desktop_state,
             pane_split,
+            pane_focus,
+            pane_close,
             session_send_input,
             session_restart,
             session_resize
@@ -1232,6 +1320,131 @@ mod tests {
         assert!(restart_response.is_ok());
         assert_eq!(restart_response.result().unwrap()["sessionId"], "session:2");
         assert_eq!(restart_response.result().unwrap()["paneId"], "pane-1");
+    }
+
+    #[test]
+    fn handle_runtime_request_pane_focus_updates_snapshot_focus() {
+        let mut runtime = test_runtime();
+        let split = handle_runtime_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req-split",
+                "type": "command",
+                "command": "pane.split",
+                "payload": {
+                    "workspaceId": "ws-inbox",
+                    "paneId": "pane-1",
+                    "newPaneId": "pane-2",
+                    "orientation": "vertical",
+                    "ratio": 0.5
+                }
+            }"#,
+            &mut runtime,
+        );
+        let split_response: ResponseEnvelope = serde_json::from_str(&split).unwrap();
+        assert!(split_response.is_ok());
+
+        let focused = handle_runtime_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req-focus",
+                "type": "command",
+                "command": "pane.focus",
+                "payload": {
+                    "workspaceId": "ws-inbox",
+                    "paneId": "pane-1"
+                }
+            }"#,
+            &mut runtime,
+        );
+        let focus_response: ResponseEnvelope = serde_json::from_str(&focused).unwrap();
+        assert!(focus_response.is_ok());
+        assert_eq!(runtime.snapshot().workspaces[0].focused_pane_id, "pane-1");
+    }
+
+    #[test]
+    fn handle_runtime_request_pane_close_removes_live_session_binding() {
+        let mut runtime = test_runtime();
+        let split = handle_runtime_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req-split",
+                "type": "command",
+                "command": "pane.split",
+                "payload": {
+                    "workspaceId": "ws-inbox",
+                    "paneId": "pane-1",
+                    "newPaneId": "pane-2",
+                    "orientation": "vertical",
+                    "ratio": 0.5
+                }
+            }"#,
+            &mut runtime,
+        );
+        let split_response: ResponseEnvelope = serde_json::from_str(&split).unwrap();
+        assert!(split_response.is_ok());
+        assert_eq!(runtime.sessions.session_id_for_pane("ws-inbox", "pane-2"), Some("session:2"));
+
+        let closed = handle_runtime_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req-close",
+                "type": "command",
+                "command": "pane.close",
+                "payload": {
+                    "workspaceId": "ws-inbox",
+                    "paneId": "pane-2"
+                }
+            }"#,
+            &mut runtime,
+        );
+        let close_response: ResponseEnvelope = serde_json::from_str(&closed).unwrap();
+        assert!(close_response.is_ok());
+        assert_eq!(runtime.sessions.session_id_for_pane("ws-inbox", "pane-2"), None);
+        assert_eq!(runtime.snapshot().workspaces[0].panes.len(), 1);
+    }
+
+    #[test]
+    fn handle_runtime_request_closing_focused_pane_moves_focus_to_neighbor() {
+        let mut runtime = test_runtime();
+        let split = handle_runtime_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req-split",
+                "type": "command",
+                "command": "pane.split",
+                "payload": {
+                    "workspaceId": "ws-inbox",
+                    "paneId": "pane-1",
+                    "newPaneId": "pane-2",
+                    "orientation": "vertical",
+                    "ratio": 0.5
+                }
+            }"#,
+            &mut runtime,
+        );
+        let split_response: ResponseEnvelope = serde_json::from_str(&split).unwrap();
+        assert!(split_response.is_ok());
+
+        let closed = handle_runtime_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req-close",
+                "type": "command",
+                "command": "pane.close",
+                "payload": {
+                    "workspaceId": "ws-inbox",
+                    "paneId": "pane-2"
+                }
+            }"#,
+            &mut runtime,
+        );
+        let close_response: ResponseEnvelope = serde_json::from_str(&closed).unwrap();
+        assert!(close_response.is_ok());
+
+        let snapshot = runtime.snapshot();
+        assert_eq!(snapshot.workspaces[0].focused_pane_id, "pane-1");
+        assert_eq!(snapshot.workspaces[0].panes[0].pane_id, "pane-1");
     }
 
     #[test]

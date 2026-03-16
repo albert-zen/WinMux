@@ -19,3 +19,11 @@ export function sessionRestart(sessionId: string): Promise<void> {
 export function sessionResize(sessionId: string, rows: number, cols: number): Promise<void> {
   return invoke("session_resize", { sessionId, rows, cols });
 }
+
+export function paneFocus(workspaceId: string, paneId: string): Promise<void> {
+  return invoke("pane_focus", { workspaceId, paneId });
+}
+
+export function paneClose(workspaceId: string, paneId: string): Promise<void> {
+  return invoke("pane_close", { workspaceId, paneId });
+}

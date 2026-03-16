@@ -1,6 +1,6 @@
 import { APP_NAME } from "@cmux-win/protocol";
 import { useDesktopState } from "./hooks/useDesktopState";
-import { paneSplit, sessionRestart } from "./lib/desktopClient";
+import { paneSplit, sessionRestart, paneFocus, paneClose } from "./lib/desktopClient";
 import { PaneTerminal } from "./components/PaneTerminal";
 import "./App.css";
 
@@ -26,6 +26,16 @@ function App() {
     }
 
     void sessionRestart(sessionId);
+  };
+
+  const handleFocus = (paneId: string) => {
+    if (!workspace) return;
+    void paneFocus(workspace.id, paneId);
+  };
+
+  const handleClose = (paneId: string) => {
+    if (!workspace) return;
+    void paneClose(workspace.id, paneId);
   };
 
   return (
@@ -58,11 +68,14 @@ function App() {
           <div className="pane-grid">
             {workspace.panes.map((pane) => {
               const isFocused = pane.paneId === workspace.focusedPaneId;
+              const canClosePane = workspace.panes.length > 1;
 
               return (
                 <article
                   className={`pane-card${isFocused ? " pane-card-focused" : ""}`}
                   key={pane.paneId}
+                  data-testid={`pane-card-${pane.paneId}`}
+                  onClick={!isFocused ? () => handleFocus(pane.paneId) : undefined}
                 >
                   <div className="pane-head">
                     <div>
@@ -70,6 +83,14 @@ function App() {
                       <span>{pane.sessionId ?? "no session"}</span>
                     </div>
                     <div className={`pane-status pane-status-${pane.status}`}>{pane.status}</div>
+                    <button
+                      type="button"
+                      aria-label={`Close ${pane.paneId}`}
+                      disabled={!canClosePane}
+                      onClick={(e) => { e.stopPropagation(); handleClose(pane.paneId); }}
+                    >
+                      ×
+                    </button>
                   </div>
                   <PaneTerminal pane={pane} isFocused={isFocused} />
                   {pane.status === "exited" ? (

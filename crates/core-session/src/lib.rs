@@ -542,6 +542,27 @@ where
         }
     }
 
+    pub fn remove_pane(&mut self, workspace_id: &str, pane_id: &str) {
+        let binding = (workspace_id.to_string(), pane_id.to_string());
+        self.pane_bindings.remove(&binding);
+
+        let session_ids = self
+            .sessions
+            .iter()
+            .filter_map(|(session_id, session)| {
+                if session.workspace_id == workspace_id && session.pane_id == pane_id {
+                    Some(session_id.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        for session_id in session_ids {
+            self.sessions.remove(&session_id);
+        }
+    }
+
     #[must_use]
     pub fn snapshot(&mut self) -> Vec<SessionSnapshot> {
         let mut snapshots = self
@@ -1011,6 +1032,54 @@ mod tests {
         assert_eq!(second_session, "session:2");
         assert_eq!(all_sessions.len(), 1);
         assert_eq!(all_sessions[0].session_id, "session:2");
+    }
+
+    #[test]
+    fn live_registry_remove_pane_clears_binding_and_sessions() {
+        let factory = FakeFactory::default();
+        let mut registry = LiveSessionRegistry::new(factory);
+        registry
+            .start(
+                "ws-1",
+                "pane-1",
+                SessionSpec::new("shell", "pwsh"),
+                TerminalSize { rows: 24, cols: 80 },
+            )
+            .unwrap();
+        registry
+            .start(
+                "ws-1",
+                "pane-2",
+                SessionSpec::new("shell", "cmd.exe"),
+                TerminalSize { rows: 24, cols: 80 },
+            )
+            .unwrap();
+
+        registry.remove_pane("ws-1", "pane-2");
+
+        assert_eq!(registry.session_id_for_pane("ws-1", "pane-2"), None);
+        let sessions = registry.snapshot();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].pane_id, "pane-1");
+    }
+
+    #[test]
+    fn live_registry_remove_pane_ignores_missing_bindings() {
+        let factory = FakeFactory::default();
+        let mut registry = LiveSessionRegistry::new(factory);
+        let session_id = registry
+            .start(
+                "ws-1",
+                "pane-1",
+                SessionSpec::new("shell", "pwsh"),
+                TerminalSize { rows: 24, cols: 80 },
+            )
+            .unwrap();
+
+        registry.remove_pane("ws-1", "pane-missing");
+
+        assert_eq!(registry.session_id_for_pane("ws-1", "pane-1"), Some("session:1"));
+        assert_eq!(registry.snapshot()[0].session_id, session_id);
     }
 
     #[test]

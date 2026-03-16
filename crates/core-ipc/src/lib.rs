@@ -315,6 +315,8 @@ pub fn validate_request(request: &RequestEnvelope) -> Result<(), ProtocolError> 
     match request.command.as_str() {
         "workspace.create" => validate_workspace_create_payload(&request.payload),
         "pane.split" => validate_pane_split_payload(&request.payload),
+        "pane.close" => validate_pane_close_payload(&request.payload),
+        "pane.focus" => validate_pane_focus_payload(&request.payload),
         "session.start" => validate_session_start_payload(&request.payload),
         "session.sendInput" => validate_session_send_input_payload(&request.payload),
         "session.resize" => validate_session_resize_payload(&request.payload),
@@ -365,6 +367,20 @@ fn validate_pane_split_payload(payload: &Value) -> Result<(), ProtocolError> {
         ));
     }
 
+    Ok(())
+}
+
+fn validate_pane_close_payload(payload: &Value) -> Result<(), ProtocolError> {
+    let object = payload_object(payload)?;
+    required_string_field(object, "workspaceId")?;
+    required_string_field(object, "paneId")?;
+    Ok(())
+}
+
+fn validate_pane_focus_payload(payload: &Value) -> Result<(), ProtocolError> {
+    let object = payload_object(payload)?;
+    required_string_field(object, "workspaceId")?;
+    required_string_field(object, "paneId")?;
     Ok(())
 }
 
@@ -888,6 +904,44 @@ mod tests {
     }
 
     #[test]
+    fn parse_and_validate_accepts_valid_pane_focus_requests() {
+        let request = parse_and_validate_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req_124",
+                "type": "command",
+                "command": "pane.focus",
+                "payload": {
+                    "workspaceId": "ws_1",
+                    "paneId": "pane_2"
+                }
+            }"#,
+        )
+        .expect("valid pane.focus should pass");
+
+        assert_eq!(request.command(), "pane.focus");
+    }
+
+    #[test]
+    fn parse_and_validate_accepts_valid_pane_close_requests() {
+        let request = parse_and_validate_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req_125",
+                "type": "command",
+                "command": "pane.close",
+                "payload": {
+                    "workspaceId": "ws_1",
+                    "paneId": "pane_2"
+                }
+            }"#,
+        )
+        .expect("valid pane.close should pass");
+
+        assert_eq!(request.command(), "pane.close");
+    }
+
+    #[test]
     fn parse_and_validate_rejects_malformed_json() {
         let err = parse_and_validate_request("{ not valid json }")
             .expect_err("malformed json should fail");
@@ -1154,6 +1208,8 @@ pub fn dispatch(request: &RequestEnvelope, registry: &mut WorkspaceRegistry) -> 
     match request.command() {
         "workspace.create" => handle_workspace_create(request, registry),
         "pane.split" => handle_pane_split(request, registry),
+        "pane.close" => handle_pane_close(request, registry),
+        "pane.focus" => handle_pane_focus(request, registry),
         "notify.send" => handle_notify_send(request),
         cmd => ResponseEnvelope::error(
             request.id(),
@@ -1260,6 +1316,72 @@ fn handle_notify_send(request: &RequestEnvelope) -> ResponseEnvelope {
             "level": level,
         }),
     )
+}
+
+fn handle_pane_close(
+    request: &RequestEnvelope,
+    registry: &mut WorkspaceRegistry,
+) -> ResponseEnvelope {
+    let p = request.payload();
+    let workspace_id = p["workspaceId"].as_str().unwrap_or_default();
+    let pane_id = p["paneId"].as_str().unwrap_or_default();
+
+    match registry.close_pane(workspace_id, pane_id) {
+        Ok(()) => ResponseEnvelope::success(
+            request.id(),
+            serde_json::json!({ "workspaceId": workspace_id, "paneId": pane_id }),
+        ),
+        Err(WorkspaceError::WorkspaceNotFound) => ResponseEnvelope::error(
+            request.id(),
+            ProtocolError::new(
+                ErrorCode::NotFound,
+                format!("Workspace not found: {workspace_id}"),
+            ),
+        ),
+        Err(WorkspaceError::Layout(LayoutError::PaneNotFound)) => ResponseEnvelope::error(
+            request.id(),
+            ProtocolError::new(ErrorCode::NotFound, format!("Pane not found: {pane_id}")),
+        ),
+        Err(WorkspaceError::Layout(LayoutError::WouldEmptyWorkspace)) => ResponseEnvelope::error(
+            request.id(),
+            ProtocolError::new(ErrorCode::Conflict, "Cannot close the last pane"),
+        ),
+        Err(e) => ResponseEnvelope::error(
+            request.id(),
+            ProtocolError::new(ErrorCode::InternalError, format!("{e:?}")),
+        ),
+    }
+}
+
+fn handle_pane_focus(
+    request: &RequestEnvelope,
+    registry: &mut WorkspaceRegistry,
+) -> ResponseEnvelope {
+    let p = request.payload();
+    let workspace_id = p["workspaceId"].as_str().unwrap_or_default();
+    let pane_id = p["paneId"].as_str().unwrap_or_default();
+
+    match registry.focus_pane(workspace_id, pane_id) {
+        Ok(()) => ResponseEnvelope::success(
+            request.id(),
+            serde_json::json!({ "workspaceId": workspace_id, "paneId": pane_id }),
+        ),
+        Err(WorkspaceError::WorkspaceNotFound) => ResponseEnvelope::error(
+            request.id(),
+            ProtocolError::new(
+                ErrorCode::NotFound,
+                format!("Workspace not found: {workspace_id}"),
+            ),
+        ),
+        Err(WorkspaceError::Layout(LayoutError::PaneNotFound)) => ResponseEnvelope::error(
+            request.id(),
+            ProtocolError::new(ErrorCode::NotFound, format!("Pane not found: {pane_id}")),
+        ),
+        Err(e) => ResponseEnvelope::error(
+            request.id(),
+            ProtocolError::new(ErrorCode::InternalError, format!("{e:?}")),
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -1418,6 +1540,85 @@ mod handler_tests {
 
         assert!(!resp.is_ok());
         assert_eq!(resp.error().unwrap().code, ErrorCode::Conflict);
+    }
+
+    #[test]
+    fn pane_focus_updates_the_workspace_focus_target() {
+        let mut reg = inbox_registry();
+        let split = RequestEnvelope::new(
+            "r7c",
+            "pane.split",
+            json!({
+                "workspaceId": "ws-inbox",
+                "paneId": "pane-1",
+                "newPaneId": "pane-2",
+                "orientation": "vertical",
+                "ratio": 0.5
+            }),
+        );
+        dispatch(&split, &mut reg);
+
+        let req = RequestEnvelope::new(
+            "r7d",
+            "pane.focus",
+            json!({
+                "workspaceId": "ws-inbox",
+                "paneId": "pane-1"
+            }),
+        );
+        let resp = dispatch(&req, &mut reg);
+
+        assert!(resp.is_ok());
+        assert_eq!(reg.list()[0].layout.focused_pane_id, "pane-1");
+    }
+
+    #[test]
+    fn pane_focus_returns_not_found_for_unknown_pane() {
+        let mut reg = inbox_registry();
+
+        let req = RequestEnvelope::new(
+            "r7d-missing",
+            "pane.focus",
+            json!({
+                "workspaceId": "ws-inbox",
+                "paneId": "pane-missing"
+            }),
+        );
+        let resp = dispatch(&req, &mut reg);
+
+        assert!(!resp.is_ok());
+        assert_eq!(resp.error().unwrap().code, ErrorCode::NotFound);
+    }
+
+    #[test]
+    fn pane_close_removes_the_target_pane() {
+        let mut reg = inbox_registry();
+        let split = RequestEnvelope::new(
+            "r7e",
+            "pane.split",
+            json!({
+                "workspaceId": "ws-inbox",
+                "paneId": "pane-1",
+                "newPaneId": "pane-2",
+                "orientation": "vertical",
+                "ratio": 0.5
+            }),
+        );
+        dispatch(&split, &mut reg);
+
+        let req = RequestEnvelope::new(
+            "r7f",
+            "pane.close",
+            json!({
+                "workspaceId": "ws-inbox",
+                "paneId": "pane-2"
+            }),
+        );
+        let resp = dispatch(&req, &mut reg);
+
+        assert!(resp.is_ok());
+        assert_eq!(reg.list()[0].layout.panes.len(), 1);
+        assert_eq!(reg.list()[0].layout.panes[0].pane_id, "pane-1");
     }
 
     // ── notify.send ───────────────────────────────────────────────────────

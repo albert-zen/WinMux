@@ -3,6 +3,8 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import App from "./App";
 import { useDesktopState } from "./hooks/useDesktopState";
 import {
+  paneClose,
+  paneFocus,
   paneSplit,
   sessionRestart,
 } from "./lib/desktopClient";
@@ -13,6 +15,8 @@ vi.mock("./hooks/useDesktopState", () => ({
 }));
 
 vi.mock("./lib/desktopClient", () => ({
+  paneClose: vi.fn(),
+  paneFocus: vi.fn(),
   paneSplit: vi.fn(),
   sessionRestart: vi.fn(),
 }));
@@ -105,5 +109,154 @@ describe("App terminal pane", () => {
 
     expect(screen.queryByPlaceholderText("Type a command")).toBeNull();
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+  });
+
+  it("focuses a different pane when its card is clicked", () => {
+    vi.mocked(useDesktopState).mockReturnValue({
+      state: {
+        protocolVersion: 1,
+        workspaces: [
+          {
+            id: "ws-inbox",
+            name: "inbox",
+            rootDir: "D:\\dev\\inbox",
+            shellProfile: "cmd.exe",
+            focusedPaneId: "pane-1",
+            panes: [
+              {
+                paneId: "pane-1",
+                sessionId: "session:1",
+                status: "running",
+                output: "one",
+              },
+              {
+                paneId: "pane-2",
+                sessionId: "session:2",
+                status: "running",
+                output: "two",
+              },
+            ],
+          },
+        ],
+      },
+      error: null,
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("pane-card-pane-2"));
+
+    expect(paneFocus).toHaveBeenCalledWith("ws-inbox", "pane-2");
+  });
+
+  it("closes a pane when the close action is used", () => {
+    vi.mocked(useDesktopState).mockReturnValue({
+      state: {
+        protocolVersion: 1,
+        workspaces: [
+          {
+            id: "ws-inbox",
+            name: "inbox",
+            rootDir: "D:\\dev\\inbox",
+            shellProfile: "cmd.exe",
+            focusedPaneId: "pane-1",
+            panes: [
+              {
+                paneId: "pane-1",
+                sessionId: "session:1",
+                status: "running",
+                output: "one",
+              },
+              {
+                paneId: "pane-2",
+                sessionId: "session:2",
+                status: "running",
+                output: "two",
+              },
+            ],
+          },
+        ],
+      },
+      error: null,
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close pane-2" }));
+
+    expect(paneClose).toHaveBeenCalledWith("ws-inbox", "pane-2");
+  });
+
+  it("closes the focused pane when its close action is used", () => {
+    vi.mocked(useDesktopState).mockReturnValue({
+      state: {
+        protocolVersion: 1,
+        workspaces: [
+          {
+            id: "ws-inbox",
+            name: "inbox",
+            rootDir: "D:\\dev\\inbox",
+            shellProfile: "cmd.exe",
+            focusedPaneId: "pane-1",
+            panes: [
+              {
+                paneId: "pane-1",
+                sessionId: "session:1",
+                status: "running",
+                output: "one",
+              },
+              {
+                paneId: "pane-2",
+                sessionId: "session:2",
+                status: "running",
+                output: "two",
+              },
+            ],
+          },
+        ],
+      },
+      error: null,
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close pane-1" }));
+
+    expect(paneClose).toHaveBeenCalledWith("ws-inbox", "pane-1");
+  });
+
+  it("disables close when only one pane remains", () => {
+    vi.mocked(useDesktopState).mockReturnValue({
+      state: {
+        protocolVersion: 1,
+        workspaces: [
+          {
+            id: "ws-inbox",
+            name: "inbox",
+            rootDir: "D:\\dev\\inbox",
+            shellProfile: "cmd.exe",
+            focusedPaneId: "pane-1",
+            panes: [
+              {
+                paneId: "pane-1",
+                sessionId: "session:1",
+                status: "running",
+                output: "one",
+              },
+            ],
+          },
+        ],
+      },
+      error: null,
+    });
+
+    render(<App />);
+
+    const closeButton = screen.getByRole("button", {
+      name: "Close pane-1",
+    }) as HTMLButtonElement;
+    expect(closeButton.disabled).toBe(true);
+    fireEvent.click(closeButton);
+    expect(paneClose).not.toHaveBeenCalled();
   });
 });
