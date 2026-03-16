@@ -15,6 +15,7 @@
 ## Process
 
 - `process/HANDOFF.md`
+- `process/DEVELOPMENT_PLAN.md`
 - `process/ROADMAP.md`
 - `process/TASKS.md`
 - `process/TESTING.md`
