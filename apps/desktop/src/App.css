@@ -103,7 +103,6 @@ input {
 }
 
 .workspace-toolbar button,
-.pane-input-row button,
 .secondary-button {
   background: #7b4b2a;
   color: #f6efe7;
@@ -166,38 +165,24 @@ input {
   color: #b9b0a4;
 }
 
-.pane-output {
-  margin: 0;
-  min-height: 220px;
-  padding: 12px;
+.pane-terminal-surface {
+  height: 248px;
   border-radius: 8px;
   background: #11100f;
   border: 1px solid #2e2823;
-  color: #f1ede8;
-  font-family: "Cascadia Code", "Consolas", monospace;
-  font-size: 0.9rem;
-  white-space: pre-wrap;
-  overflow: auto;
+  overflow: hidden;
 }
 
-.pane-input-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 12px;
+.pane-terminal-surface .xterm {
+  height: 100%;
 }
 
-.pane-input-row input {
-  min-width: 0;
-  padding: 11px 12px;
-  border-radius: 8px;
-  border: 1px solid #41372f;
-  background: #171412;
-  color: #f1ede8;
+.pane-terminal-surface .xterm-viewport {
+  scrollbar-color: #4a4037 #11100f;
 }
 
-.pane-input-row input:focus {
-  outline: 2px solid #7b4b2a;
-  outline-offset: 1px;
+.pane-terminal-surface:focus-within {
+  border-color: #7b4b2a;
 }
 
 .error-text {
@@ -217,9 +202,5 @@ input {
 
   .header-meta {
     justify-items: start;
-  }
-
-  .pane-input-row {
-    grid-template-columns: 1fr;
   }
 }

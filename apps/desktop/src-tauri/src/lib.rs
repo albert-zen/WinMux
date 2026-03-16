@@ -280,6 +280,33 @@ fn session_restart(
     }
 }
 
+#[tauri::command]
+fn session_resize(
+    session_id: String,
+    rows: u16,
+    cols: u16,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let request = RequestEnvelope::new(
+        "desktop-resize",
+        "session.resize",
+        json!({
+            "sessionId": session_id,
+            "rows": rows,
+            "cols": cols,
+        }),
+    );
+    let response = dispatch_runtime_request(&request, &mut state.runtime.lock().unwrap());
+    if response.is_ok() {
+        Ok(())
+    } else {
+        Err(response
+            .error()
+            .map(|error| error.message.clone())
+            .unwrap_or_else(|| "resize failed".to_string()))
+    }
+}
+
 fn default_terminal_size() -> TerminalSize {
     TerminalSize { rows: 24, cols: 80 }
 }
@@ -782,7 +809,8 @@ pub fn run() {
             desktop_state,
             pane_split,
             session_send_input,
-            session_restart
+            session_restart,
+            session_resize
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

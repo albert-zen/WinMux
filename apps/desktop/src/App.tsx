@@ -1,27 +1,18 @@
-import { useState } from "react";
 import { APP_NAME } from "@cmux-win/protocol";
 import { useDesktopState } from "./hooks/useDesktopState";
-import { paneSplit, sessionRestart, sessionSendInput } from "./lib/desktopClient";
+import { paneSplit, sessionRestart } from "./lib/desktopClient";
+import { PaneTerminal } from "./components/PaneTerminal";
 import "./App.css";
 
 function App() {
   const { state, error } = useDesktopState();
-  const [input, setInput] = useState("");
 
   const workspace = state?.workspaces[0] ?? null;
-  const focusedPane =
-    workspace?.panes.find((pane) => pane.paneId === workspace.focusedPaneId) ?? null;
-
-  const handleSend = () => {
-    if (!focusedPane?.sessionId || input.trim() === "") {
-      return;
-    }
-
-    void sessionSendInput(focusedPane.sessionId, `${input}\r\n`);
-    setInput("");
-  };
 
   const handleSplit = () => {
+    const focusedPane = workspace?.panes.find(
+      (pane) => pane.paneId === workspace.focusedPaneId
+    ) ?? null;
     if (!workspace || !focusedPane) {
       return;
     }
@@ -80,7 +71,7 @@ function App() {
                     </div>
                     <div className={`pane-status pane-status-${pane.status}`}>{pane.status}</div>
                   </div>
-                  <pre className="pane-output">{pane.output}</pre>
+                  <PaneTerminal pane={pane} isFocused={isFocused} />
                   {pane.status === "exited" ? (
                     <button
                       type="button"
@@ -93,18 +84,6 @@ function App() {
                 </article>
               );
             })}
-          </div>
-
-          <div className="pane-input-row">
-            <input
-              aria-label="Terminal input"
-              placeholder="Type a command"
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-            />
-            <button type="button" onClick={handleSend}>
-              Send
-            </button>
           </div>
         </section>
       ) : (

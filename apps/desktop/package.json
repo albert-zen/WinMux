@@ -14,12 +14,15 @@
   "dependencies": {
     "@cmux-win/protocol": "workspace:*",
     "@cmux-win/ui": "workspace:*",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
     "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-opener": "^2"
+    "@tauri-apps/plugin-opener": "^2",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",
     "@types/node": "^24.3.0",
@@ -29,7 +32,6 @@
     "jsdom": "^26.1.0",
     "typescript": "~5.8.3",
     "vite": "^7.0.4",
-    "vitest": "^3.2.4",
-    "@tauri-apps/cli": "^2"
+    "vitest": "^3.2.4"
   }
 }

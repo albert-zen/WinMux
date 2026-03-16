@@ -5,8 +5,8 @@ import { useDesktopState } from "./hooks/useDesktopState";
 import {
   paneSplit,
   sessionRestart,
-  sessionSendInput,
 } from "./lib/desktopClient";
+import { PaneTerminal } from "./components/PaneTerminal";
 
 vi.mock("./hooks/useDesktopState", () => ({
   useDesktopState: vi.fn(),
@@ -15,7 +15,10 @@ vi.mock("./hooks/useDesktopState", () => ({
 vi.mock("./lib/desktopClient", () => ({
   paneSplit: vi.fn(),
   sessionRestart: vi.fn(),
-  sessionSendInput: vi.fn(),
+}));
+
+vi.mock("./components/PaneTerminal", () => ({
+  PaneTerminal: vi.fn(({ pane }) => <div data-testid={`pane-terminal-${pane.paneId}`} />),
 }));
 
 describe("App terminal pane", () => {
@@ -45,22 +48,16 @@ describe("App terminal pane", () => {
     });
   });
 
-  it("renders pane output and running status", () => {
+  it("renders pane status and terminal region", () => {
     render(<App />);
 
-    expect(screen.getByText("hello from pane-1")).toBeTruthy();
     expect(screen.getByText("running")).toBeTruthy();
-  });
-
-  it("sends pane input to the focused session", () => {
-    render(<App />);
-
-    fireEvent.change(screen.getByPlaceholderText("Type a command"), {
-      target: { value: "dir" },
+    expect(screen.getByTestId("pane-terminal-pane-1")).toBeTruthy();
+    expect(vi.mocked(PaneTerminal)).toHaveBeenCalled();
+    expect(vi.mocked(PaneTerminal).mock.calls[0][0]).toMatchObject({
+      isFocused: true,
+      pane: expect.objectContaining({ paneId: "pane-1" }),
     });
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
-
-    expect(sessionSendInput).toHaveBeenCalledWith("session:1", "dir\r\n");
   });
 
   it("splits the focused pane", () => {
@@ -101,5 +98,12 @@ describe("App terminal pane", () => {
     fireEvent.click(screen.getByRole("button", { name: "Restart" }));
 
     expect(sessionRestart).toHaveBeenCalledWith("session:1");
+  });
+
+  it("does not render the temporary text input row anymore", () => {
+    render(<App />);
+
+    expect(screen.queryByPlaceholderText("Type a command")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
   });
 });

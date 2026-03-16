@@ -15,3 +15,7 @@ export function paneSplit(
 export function sessionRestart(sessionId: string): Promise<void> {
   return invoke("session_restart", { sessionId });
 }
+
+export function sessionResize(sessionId: string, rows: number, cols: number): Promise<void> {
+  return invoke("session_resize", { sessionId, rows, cols });
+}
