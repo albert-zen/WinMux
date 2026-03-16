@@ -1,0 +1,14 @@
+[workspace]
+members = [
+  "apps/desktop/src-tauri",
+  "crates/core-events",
+  "crates/core-ipc",
+  "crates/core-layout",
+  "crates/core-notify",
+  "crates/core-pty",
+  "crates/core-session",
+  "crates/core-state",
+  "crates/core-theme"
+]
+resolver = "3"
+

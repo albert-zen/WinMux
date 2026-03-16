@@ -1,0 +1,9 @@
+{
+  "name": "@cmux-win/cli",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "cmux-win": "./src/index.mjs"
+  }
+}

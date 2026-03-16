@@ -1,0 +1,134 @@
+:root {
+  font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  font-weight: 400;
+  color: #ecf3ef;
+  background:
+    radial-gradient(circle at top, rgba(55, 98, 90, 0.3), transparent 45%),
+    linear-gradient(180deg, #0b1210 0%, #111a18 100%);
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.shell {
+  min-height: 100vh;
+  padding: 48px 28px;
+  display: grid;
+  gap: 24px;
+}
+
+.hero {
+  max-width: 760px;
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  font-size: 0.84rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #84bda6;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: clamp(2.2rem, 4vw, 4.4rem);
+  line-height: 0.98;
+}
+
+.lede {
+  max-width: 62ch;
+  color: rgba(236, 243, 239, 0.78);
+}
+
+.starter-surface {
+  padding: 22px;
+  border: 1px solid rgba(132, 189, 166, 0.2);
+  border-radius: 24px;
+  background: rgba(10, 18, 16, 0.78);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 22px 80px rgba(0, 0, 0, 0.28);
+}
+
+.starter-surface h2,
+.status-card h2 {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+}
+
+.starter-surface p,
+.status-card li {
+  color: rgba(236, 243, 239, 0.75);
+}
+
+.metric-grid,
+.status-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.metric-grid {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  margin-top: 18px;
+}
+
+.metric {
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.metric-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #84bda6;
+}
+
+.metric-value {
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 1.15rem;
+}
+
+.status-grid {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.status-card {
+  padding: 22px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.status-card ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.error {
+  margin: 0;
+  color: #ffb8a2;
+}
+
+@media (max-width: 720px) {
+  .shell {
+    padding: 28px 18px 40px;
+  }
+}
