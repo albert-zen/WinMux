@@ -29,7 +29,11 @@ function startMockServer(response) {
         buf += chunk.toString("utf8");
         const nl = buf.indexOf("\n");
         if (nl !== -1) {
-          try { received.push(JSON.parse(buf.slice(0, nl))); } catch {}
+          try {
+            received.push(JSON.parse(buf.slice(0, nl)));
+          } catch (error) {
+            received.push({ __parseError: error.message, raw: buf.slice(0, nl) });
+          }
           const next = typeof response === "function"
             ? response(received[received.length - 1])
             : response;
@@ -157,6 +161,54 @@ test("pane split accepts horizontal orientation", async () => {
   assert.equal(received[0].payload.ratio, 0.3);
 });
 
+test("session start sends request over pipe and prints response", async () => {
+  const { result, received } = await runViaPipe(
+    ["session", "start", "--workspace-id", "ws-1", "--pane-id", "pane-1",
+     "--shell-profile", "cmd.exe", "--cols", "120", "--rows", "40"],
+    { ok: true, result: { sessionId: "session:1" } },
+  );
+  assert.equal(result.status, 0, `exited ${result.status}: ${result.stderr}`);
+  assert.equal(received[0].command, "session.start");
+  assert.equal(received[0].payload.workspaceId, "ws-1");
+  assert.equal(received[0].payload.paneId, "pane-1");
+  assert.equal(received[0].payload.shellProfile, "cmd.exe");
+  assert.equal(received[0].payload.cols, 120);
+  assert.equal(received[0].payload.rows, 40);
+});
+
+test("session send-input sends request over pipe", async () => {
+  const { result, received } = await runViaPipe(
+    ["session", "send-input", "--session-id", "session:1", "--data", "echo hi\r\n"],
+    { ok: true, result: { delivered: true } },
+  );
+  assert.equal(result.status, 0, `exited ${result.status}: ${result.stderr}`);
+  assert.equal(received[0].command, "session.sendInput");
+  assert.equal(received[0].payload.sessionId, "session:1");
+  assert.equal(received[0].payload.data, "echo hi\r\n");
+});
+
+test("session status sends request over pipe", async () => {
+  const { result, received } = await runViaPipe(
+    ["session", "status", "--session-id", "session:1"],
+    { ok: true, result: { sessionId: "session:1", status: "running" } },
+  );
+  assert.equal(result.status, 0, `exited ${result.status}: ${result.stderr}`);
+  assert.equal(received[0].command, "session.getStatus");
+  assert.equal(received[0].payload.sessionId, "session:1");
+});
+
+test("session resize sends request over pipe", async () => {
+  const { result, received } = await runViaPipe(
+    ["session", "resize", "--session-id", "session:1", "--cols", "132", "--rows", "48"],
+    { ok: true, result: { resized: true } },
+  );
+  assert.equal(result.status, 0, `exited ${result.status}: ${result.stderr}`);
+  assert.equal(received[0].command, "session.resize");
+  assert.equal(received[0].payload.sessionId, "session:1");
+  assert.equal(received[0].payload.cols, 132);
+  assert.equal(received[0].payload.rows, 48);
+});
+
 // --- transport error paths ---
 
 test("server ok=false exits non-zero with error message", async () => {
@@ -243,6 +295,46 @@ test("invalid level exits non-zero", () => {
   const r = run(["notify", "--title", "t", "--body", "b", "--level", "critical"]);
   assert.notEqual(r.status, 0);
   assert.ok(r.stderr.includes("level"), `stderr: ${r.stderr}`);
+});
+
+test("session start rejects zero cols", () => {
+  const r = run([
+    "session", "start",
+    "--workspace-id", "ws-1",
+    "--pane-id", "pane-1",
+    "--shell-profile", "cmd.exe",
+    "--cols", "0",
+    "--rows", "24",
+  ]);
+  assert.notEqual(r.status, 0);
+  assert.ok(r.stderr.includes("cols"), `stderr: ${r.stderr}`);
+});
+
+test("session resize rejects zero rows", () => {
+  const r = run([
+    "session", "resize",
+    "--session-id", "session:1",
+    "--cols", "80",
+    "--rows", "0",
+  ]);
+  assert.notEqual(r.status, 0);
+  assert.ok(r.stderr.includes("rows"), `stderr: ${r.stderr}`);
+});
+
+test("session send-input requires data", () => {
+  const r = run([
+    "session", "send-input",
+    "--session-id", "session:1",
+    "--data",
+  ]);
+  assert.notEqual(r.status, 0);
+  assert.ok(r.stderr.includes("--data"), `stderr: ${r.stderr}`);
+});
+
+test("unknown session subcommand wins over flag parsing", () => {
+  const r = run(["session", "bogus", "--flag"]);
+  assert.notEqual(r.status, 0);
+  assert.ok(r.stderr.includes("unknown subcommand"), `stderr: ${r.stderr}`);
 });
 
 test("unknown top-level command exits non-zero", () => {

@@ -462,6 +462,7 @@ version = "0.1.0"
 dependencies = [
  "core-ipc",
  "core-layout",
+ "core-session",
  "core-state",
  "serde",
  "serde_json",
@@ -581,6 +582,9 @@ dependencies = [
 [[package]]
 name = "core-session"
 version = "0.1.0"
+dependencies = [
+ "core-pty",
+]
 
 [[package]]
 name = "core-state"

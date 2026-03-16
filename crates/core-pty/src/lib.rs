@@ -59,6 +59,16 @@ impl PtyHost {
     /// Returns immediately after the child process is created.  A detached
     /// thread starts reading PTY output in the background.
     pub fn spawn(command: &str, args: &[&str], size: PtySize) -> Result<Self, PtyError> {
+        Self::spawn_in_dir(command, args, size, None)
+    }
+
+    /// Spawn `command` inside a PTY and optionally set the child working directory.
+    pub fn spawn_in_dir(
+        command: &str,
+        args: &[&str],
+        size: PtySize,
+        working_dir: Option<&str>,
+    ) -> Result<Self, PtyError> {
         let pty_system: Box<dyn PtySystem> = native_pty_system();
 
         let pair = pty_system
@@ -74,6 +84,9 @@ impl PtyHost {
         let mut cmd = CommandBuilder::new(command);
         for arg in args {
             cmd.arg(arg);
+        }
+        if let Some(dir) = working_dir {
+            cmd.cwd(dir);
         }
 
         // Spawn – slave is only needed for this call; master is kept for I/O.
@@ -150,6 +163,12 @@ impl PtyHost {
     /// Returns a snapshot of all bytes collected from the PTY so far.
     pub fn collected_output(&self) -> Vec<u8> {
         self.output.lock().unwrap().clone()
+    }
+}
+
+impl Drop for PtyHost {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
     }
 }
 

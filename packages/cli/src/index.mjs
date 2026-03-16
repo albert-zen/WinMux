@@ -129,6 +129,51 @@ if (cmd === "workspace") {
   if (f["workspace-id"]) payload.workspaceId = f["workspace-id"];
   request = buildRequest("notify.send", payload);
 
+} else if (cmd === "session") {
+  const [sub, ...flagArgs] = rest;
+  if (sub === "start") {
+    const f = parseFlags(flagArgs);
+    requireFlags(f, "workspace-id", "pane-id", "shell-profile", "cols", "rows");
+    const cols = parseInt(f["cols"], 10);
+    const rows = parseInt(f["rows"], 10);
+    if (!Number.isInteger(cols) || cols <= 0) die("--cols must be a positive integer");
+    if (!Number.isInteger(rows) || rows <= 0) die("--rows must be a positive integer");
+    request = buildRequest("session.start", {
+      workspaceId: f["workspace-id"],
+      paneId: f["pane-id"],
+      shellProfile: f["shell-profile"],
+      cols,
+      rows,
+    });
+  } else if (sub === "send-input") {
+    const f = parseFlags(flagArgs);
+    requireFlags(f, "session-id", "data");
+    request = buildRequest("session.sendInput", {
+      sessionId: f["session-id"],
+      data: f["data"],
+    });
+  } else if (sub === "resize") {
+    const f = parseFlags(flagArgs);
+    requireFlags(f, "session-id", "cols", "rows");
+    const cols = parseInt(f["cols"], 10);
+    const rows = parseInt(f["rows"], 10);
+    if (!Number.isInteger(cols) || cols <= 0) die("--cols must be a positive integer");
+    if (!Number.isInteger(rows) || rows <= 0) die("--rows must be a positive integer");
+    request = buildRequest("session.resize", {
+      sessionId: f["session-id"],
+      cols,
+      rows,
+    });
+  } else if (sub === "status") {
+    const f = parseFlags(flagArgs);
+    requireFlags(f, "session-id");
+    request = buildRequest("session.getStatus", {
+      sessionId: f["session-id"],
+    });
+  } else {
+    die(`unknown subcommand: session ${sub ?? "(none)"}`);
+  }
+
 } else {
   die(`unknown command: ${cmd}`);
 }

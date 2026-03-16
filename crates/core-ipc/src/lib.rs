@@ -315,6 +315,10 @@ pub fn validate_request(request: &RequestEnvelope) -> Result<(), ProtocolError> 
     match request.command.as_str() {
         "workspace.create" => validate_workspace_create_payload(&request.payload),
         "pane.split" => validate_pane_split_payload(&request.payload),
+        "session.start" => validate_session_start_payload(&request.payload),
+        "session.sendInput" => validate_session_send_input_payload(&request.payload),
+        "session.resize" => validate_session_resize_payload(&request.payload),
+        "session.getStatus" => validate_session_get_status_payload(&request.payload),
         "notify.send" => validate_notify_payload(&request.payload),
         _ => Err(ProtocolError::new(
             ErrorCode::Unsupported,
@@ -390,6 +394,51 @@ fn validate_notify_payload(payload: &Value) -> Result<(), ProtocolError> {
     Ok(())
 }
 
+fn validate_session_start_payload(payload: &Value) -> Result<(), ProtocolError> {
+    let object = payload_object(payload)?;
+
+    required_string_field(object, "workspaceId")?;
+    required_string_field(object, "paneId")?;
+    required_string_field(object, "shellProfile")?;
+    required_positive_u16_field(object, "cols")?;
+    required_positive_u16_field(object, "rows")?;
+
+    Ok(())
+}
+
+fn validate_session_send_input_payload(payload: &Value) -> Result<(), ProtocolError> {
+    let object = payload_object(payload)?;
+
+    required_string_field(object, "sessionId")?;
+    object
+        .get("data")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            ProtocolError::new(
+                ErrorCode::InvalidPayload,
+                "Missing required field: data",
+            )
+        })?;
+
+    Ok(())
+}
+
+fn validate_session_resize_payload(payload: &Value) -> Result<(), ProtocolError> {
+    let object = payload_object(payload)?;
+
+    required_string_field(object, "sessionId")?;
+    required_positive_u16_field(object, "cols")?;
+    required_positive_u16_field(object, "rows")?;
+
+    Ok(())
+}
+
+fn validate_session_get_status_payload(payload: &Value) -> Result<(), ProtocolError> {
+    let object = payload_object(payload)?;
+    required_string_field(object, "sessionId")?;
+    Ok(())
+}
+
 fn payload_object(payload: &Value) -> Result<&Map<String, Value>, ProtocolError> {
     payload.as_object().ok_or_else(|| {
         ProtocolError::new(
@@ -425,6 +474,41 @@ fn required_string_field<'a>(
     }
 
     Ok(text)
+}
+
+fn required_positive_u16_field(
+    payload: &Map<String, Value>,
+    field: &str,
+) -> Result<u16, ProtocolError> {
+    let value = payload.get(field).ok_or_else(|| {
+        ProtocolError::new(
+            ErrorCode::InvalidPayload,
+            format!("Missing required field: {field}"),
+        )
+    })?;
+
+    let number = value.as_u64().ok_or_else(|| {
+        ProtocolError::new(
+            ErrorCode::InvalidPayload,
+            format!("Invalid field {field}: expected a positive integer"),
+        )
+    })?;
+
+    let size = u16::try_from(number).map_err(|_| {
+        ProtocolError::new(
+            ErrorCode::InvalidPayload,
+            format!("Invalid field {field}: expected a positive integer"),
+        )
+    })?;
+
+    if size == 0 {
+        return Err(ProtocolError::new(
+            ErrorCode::InvalidPayload,
+            format!("Invalid field {field}: expected a positive integer"),
+        ));
+    }
+
+    Ok(size)
 }
 
 #[cfg(test)]
@@ -902,6 +986,118 @@ mod tests {
         assert_eq!(
             err.message,
             "Invalid field workspaceId: expected a non-empty string"
+        );
+    }
+
+    #[test]
+    fn parse_and_validate_accepts_valid_session_start_requests() {
+        let request = parse_and_validate_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req_123",
+                "type": "command",
+                "command": "session.start",
+                "payload": {
+                    "workspaceId": "ws_1",
+                    "paneId": "pane_1",
+                    "shellProfile": "cmd.exe",
+                    "cols": 120,
+                    "rows": 40
+                }
+            }"#,
+        )
+        .expect("valid session.start should pass");
+
+        assert_eq!(request.command(), "session.start");
+        assert_eq!(request.payload()["shellProfile"], "cmd.exe");
+    }
+
+    #[test]
+    fn parse_and_validate_rejects_zero_sized_session_start_requests() {
+        let err = parse_and_validate_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req_123",
+                "type": "command",
+                "command": "session.start",
+                "payload": {
+                    "workspaceId": "ws_1",
+                    "paneId": "pane_1",
+                    "shellProfile": "cmd.exe",
+                    "cols": 0,
+                    "rows": 40
+                }
+            }"#,
+        )
+        .expect_err("cols=0 should fail");
+
+        assert_eq!(err.code, ErrorCode::InvalidPayload);
+        assert_eq!(err.message, "Invalid field cols: expected a positive integer");
+    }
+
+    #[test]
+    fn parse_and_validate_accepts_empty_session_input_payloads() {
+        let request = parse_and_validate_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req_123",
+                "type": "command",
+                "command": "session.sendInput",
+                "payload": {
+                    "sessionId": "session:1",
+                    "data": ""
+                }
+            }"#,
+        )
+        .expect("empty input should still be valid");
+
+        assert_eq!(request.command(), "session.sendInput");
+        assert_eq!(request.payload()["sessionId"], "session:1");
+    }
+
+    #[test]
+    fn parse_and_validate_rejects_blank_session_status_ids() {
+        let err = parse_and_validate_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req_123",
+                "type": "command",
+                "command": "session.getStatus",
+                "payload": {
+                    "sessionId": "   "
+                }
+            }"#,
+        )
+        .expect_err("blank session ids should fail");
+
+        assert_eq!(err.code, ErrorCode::InvalidPayload);
+        assert_eq!(err.message, "Invalid field sessionId: expected a non-empty string");
+    }
+
+    #[test]
+    fn dispatch_keeps_session_commands_unsupported_until_runtime_handles_them() {
+        let mut registry = WorkspaceRegistry::new();
+        let request = RequestEnvelope::new(
+            "r-session",
+            "session.start",
+            json!({
+                "workspaceId": "ws_1",
+                "paneId": "pane_1",
+                "shellProfile": "cmd.exe",
+                "cols": 80,
+                "rows": 24
+            }),
+        );
+
+        let response = dispatch(&request, &mut registry);
+
+        assert!(!response.is_ok());
+        assert_eq!(
+            response.error(),
+            Some(&ErrorPayload {
+                code: ErrorCode::Unsupported,
+                message: "Unsupported command: session.start".into(),
+            })
         );
     }
 
