@@ -29,6 +29,16 @@ export type DesktopBootstrap = {
   starterWorkspaceName: string;
   starterPaneCount: number;
   starterSplitCount: number;
+  workspaces: WorkspaceSummary[];
+};
+
+export type WorkspaceSummary = {
+  id: string;
+  name: string;
+  rootDir: string;
+  paneCount: number;
+  splitCount: number;
+  focusedPaneId: string;
 };
 
 export function createStarterWorkspaceSnapshot(): WorkspaceSnapshot {
@@ -41,6 +51,17 @@ export function createStarterWorkspaceSnapshot(): WorkspaceSnapshot {
       lastFocusedPaneId: STARTER_PANE_ID
     },
     scrollback: []
+  };
+}
+
+export function createStarterWorkspaceSummary(): WorkspaceSummary {
+  return {
+    id: "ws-inbox",
+    name: STARTER_WORKSPACE_NAME,
+    rootDir: "D:\\dev\\inbox",
+    paneCount: 1,
+    splitCount: 0,
+    focusedPaneId: STARTER_PANE_ID
   };
 }
 

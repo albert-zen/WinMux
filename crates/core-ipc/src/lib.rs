@@ -335,6 +335,7 @@ fn validate_pane_split_payload(payload: &Value) -> Result<(), ProtocolError> {
 
     required_string_field(object, "workspaceId")?;
     required_string_field(object, "paneId")?;
+    required_string_field(object, "newPaneId")?;
 
     let orientation = required_string_field(object, "orientation")?;
     if orientation != "vertical" && orientation != "horizontal" {
@@ -722,6 +723,7 @@ mod tests {
                 "payload": {
                     "workspaceId": "ws_1",
                     "paneId": "pane_1",
+                    "newPaneId": "pane_2",
                     "orientation": "vertical",
                     "ratio": 1.0
                 }
@@ -747,6 +749,7 @@ mod tests {
                 "payload": {
                     "workspaceId": "ws_1",
                     "paneId": "pane_1",
+                    "newPaneId": "pane_2",
                     "orientation": "vertical",
                     "ratio": 0.0
                 }
@@ -772,6 +775,7 @@ mod tests {
                 "payload": {
                     "workspaceId": "ws_1",
                     "paneId": "pane_1",
+                    "newPaneId": "pane_2",
                     "orientation": "horizontal",
                     "ratio": 0.5
                 }

@@ -1,12 +1,10 @@
 :root {
-  font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif;
+  font-family: "Bahnschrift", "DIN Alternate", sans-serif;
   font-size: 16px;
   line-height: 1.5;
   font-weight: 400;
-  color: #ecf3ef;
-  background:
-    radial-gradient(circle at top, rgba(55, 98, 90, 0.3), transparent 45%),
-    linear-gradient(180deg, #0b1210 0%, #111a18 100%);
+  color: #edf0ea;
+  background: #121615;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -19,6 +17,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  background: #121615;
 }
 
 #root {
@@ -27,83 +26,82 @@ body {
 
 .shell {
   min-height: 100vh;
-  padding: 48px 28px;
+  padding: 32px 28px 40px;
   display: grid;
-  gap: 24px;
+  gap: 20px;
+  max-width: 1120px;
+  margin: 0 auto;
 }
 
-.hero {
-  max-width: 760px;
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
 }
 
-.eyebrow {
-  margin: 0 0 10px;
-  font-size: 0.84rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: #84bda6;
-}
-
-.hero h1 {
+.page-header h1 {
   margin: 0;
-  font-size: clamp(2.2rem, 4vw, 4.4rem);
-  line-height: 0.98;
+  font-size: 1.9rem;
+  line-height: 1.1;
 }
 
-.lede {
-  max-width: 62ch;
-  color: rgba(236, 243, 239, 0.78);
+.page-header p {
+  margin: 6px 0 0;
+  color: #aeb8b1;
 }
 
 .starter-surface {
-  padding: 22px;
-  border: 1px solid rgba(132, 189, 166, 0.2);
-  border-radius: 24px;
-  background: rgba(10, 18, 16, 0.78);
-  backdrop-filter: blur(12px);
-  box-shadow: 0 22px 80px rgba(0, 0, 0, 0.28);
+  padding: 20px;
+  border: 1px solid #2a312e;
+  border-radius: 10px;
+  background: #181d1c;
 }
 
 .starter-surface h2,
-.status-card h2 {
+.status-card h2,
+.section-head h2 {
   margin: 0 0 8px;
-  font-size: 1.1rem;
+  font-size: 1rem;
 }
 
 .starter-surface p,
-.status-card li {
-  color: rgba(236, 243, 239, 0.75);
+.status-card li,
+.section-head p,
+.workspace-main span,
+.workspace-meta dt {
+  color: #aeb8b1;
 }
 
 .metric-grid,
-.status-grid {
+.status-grid,
+.workspace-meta {
   display: grid;
-  gap: 16px;
+  gap: 12px;
 }
 
 .metric-grid {
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  margin-top: 18px;
+  margin-top: 16px;
 }
 
 .metric {
-  padding: 14px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.04);
+  padding: 12px;
+  border-radius: 8px;
+  background: #202725;
+  border: 1px solid #29312e;
 }
 
 .metric-label {
   display: block;
   margin-bottom: 4px;
   font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #84bda6;
+  color: #91a69a;
 }
 
 .metric-value {
   font-family: "Cascadia Code", "Consolas", monospace;
-  font-size: 1.15rem;
+  font-size: 1rem;
 }
 
 .status-grid {
@@ -111,15 +109,94 @@ body {
 }
 
 .status-card {
-  padding: 22px;
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 18px;
+  border-radius: 10px;
+  background: #181d1c;
+  border: 1px solid #2a312e;
 }
 
 .status-card ul {
   margin: 0;
   padding-left: 18px;
+}
+
+.workspace-section {
+  padding: 18px;
+  border-radius: 10px;
+  background: #181d1c;
+  border: 1px solid #2a312e;
+}
+
+.section-head {
+  margin-bottom: 14px;
+}
+
+.section-head p {
+  margin: 0;
+}
+
+.workspace-list {
+  display: grid;
+  gap: 10px;
+}
+
+.workspace-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  padding: 14px 0;
+  border-top: 1px solid #232a27;
+}
+
+.workspace-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.workspace-main {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.workspace-main strong {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.workspace-main span {
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 0.88rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workspace-meta {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.workspace-meta div {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #202725;
+  border: 1px solid #29312e;
+}
+
+.workspace-meta dt,
+.workspace-meta dd {
+  margin: 0;
+}
+
+.workspace-meta dt {
+  font-size: 0.76rem;
+}
+
+.workspace-meta dd {
+  margin-top: 4px;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 0.92rem;
 }
 
 .error {
@@ -129,6 +206,14 @@ body {
 
 @media (max-width: 720px) {
   .shell {
-    padding: 28px 18px 40px;
+    padding: 24px 16px 32px;
+  }
+
+  .workspace-row {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-meta {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }

@@ -18,18 +18,16 @@ function App() {
 
   return (
     <main className="shell">
-      <section className="hero">
-        <p className="eyebrow">Windows-first terminal workspace manager</p>
-        <h1>{APP_NAME} repo bootstrap is live.</h1>
-        <p className="lede">
-          This shell proves the monorepo wiring, Tauri command path, shared protocol package,
-          and first Rust crates are connected.
-        </p>
-      </section>
+      <header className="page-header">
+        <div>
+          <h1>{APP_NAME}</h1>
+          <p>Bootstrap shell with live workspace data from the Rust core.</p>
+        </div>
+      </header>
 
       <StarterSurface
         title="Desktop Bootstrap"
-        subtitle="The app shell is reading shared TypeScript and Rust state instead of template code."
+        subtitle="The desktop app is reading shared TypeScript and Rust state instead of a static template."
         metrics={[
           { label: "Protocol", value: `v${bootstrap?.protocolVersion ?? PROTOCOL_VERSION}` },
           { label: "Starter workspace", value: bootstrap?.starterWorkspaceName ?? "loading" },
@@ -38,24 +36,54 @@ function App() {
         ]}
       />
 
+      <section className="workspace-section">
+        <div className="section-head">
+          <h2>Workspaces</h2>
+          <p>Current starter state returned from Tauri and `core-state`.</p>
+        </div>
+        <div className="workspace-list" role="list">
+          {(bootstrap?.workspaces ?? []).map((workspace) => (
+            <article className="workspace-row" key={workspace.id} role="listitem">
+              <div className="workspace-main">
+                <strong>{workspace.name}</strong>
+                <span>{workspace.rootDir}</span>
+              </div>
+              <dl className="workspace-meta">
+                <div>
+                  <dt>Panes</dt>
+                  <dd>{workspace.paneCount}</dd>
+                </div>
+                <div>
+                  <dt>Splits</dt>
+                  <dd>{workspace.splitCount}</dd>
+                </div>
+                <div>
+                  <dt>Focus</dt>
+                  <dd>{workspace.focusedPaneId}</dd>
+                </div>
+              </dl>
+            </article>
+          ))}
+        </div>
+      </section>
+
       <section className="status-grid">
         <article className="status-card">
-          <h2>What is wired now</h2>
+          <h2>Current wiring</h2>
           <ul>
-            <li>pnpm workspace at the repository root</li>
-            <li>Tauri desktop shell in `apps/desktop`</li>
-            <li>Shared `protocol` and `ui` packages</li>
-            <li>Rust workspace with core crate boundaries</li>
+            <li>Workspace and layout state now round-trips through Rust</li>
+            <li>IPC request envelopes validate three real command shapes</li>
+            <li>CLI emits request JSON for the supported commands</li>
+            <li>Session lifecycle lives in a dedicated Rust domain crate</li>
           </ul>
         </article>
-
         <article className="status-card">
-          <h2>Next implementation slice</h2>
+          <h2>Next focus</h2>
           <ul>
-            <li>Core layout engine contracts</li>
-            <li>PTY abstraction and session lifecycle</li>
-            <li>IPC server and bundled CLI</li>
-            <li>Session restore persistence</li>
+            <li>Hook desktop commands into the live workspace registry</li>
+            <li>Attach ConPTY-backed session execution</li>
+            <li>Replace JSON-printing CLI with transport-backed requests</li>
+            <li>Render real pane trees instead of summary rows</li>
           </ul>
         </article>
       </section>

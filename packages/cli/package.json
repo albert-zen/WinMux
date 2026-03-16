@@ -5,5 +5,8 @@
   "type": "module",
   "bin": {
     "cmux-win": "./src/index.mjs"
+  },
+  "scripts": {
+    "test": "node src/index.test.mjs"
   }
 }

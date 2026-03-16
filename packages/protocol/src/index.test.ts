@@ -6,6 +6,7 @@ import {
   STARTER_PANE_ID,
   STARTER_WORKSPACE_NAME,
   applyScrollbackCap,
+  createStarterWorkspaceSummary,
   createStarterWorkspaceSnapshot
 } from "./index";
 
@@ -45,5 +46,16 @@ describe("protocol constants", () => {
     expect(METADATA_REFRESH_POLICY.strategy).toBe("hybrid");
     expect(METADATA_REFRESH_POLICY.fallbackIntervalMs).toBeGreaterThan(0);
     expect(STARTER_WORKSPACE_NAME).toBe("inbox");
+  });
+
+  it("exposes the starter workspace summary contract", () => {
+    const summary = createStarterWorkspaceSummary();
+
+    expect(summary.id).toBe("ws-inbox");
+    expect(summary.name).toBe(STARTER_WORKSPACE_NAME);
+    expect(summary.rootDir).toBe("D:\\dev\\inbox");
+    expect(summary.paneCount).toBe(1);
+    expect(summary.splitCount).toBe(0);
+    expect(summary.focusedPaneId).toBe(STARTER_PANE_ID);
   });
 });
