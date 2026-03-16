@@ -36,9 +36,33 @@ export type WorkspaceSummary = {
   id: string;
   name: string;
   rootDir: string;
+  shellProfile: string;
   paneCount: number;
   splitCount: number;
   focusedPaneId: string;
+};
+
+export type PaneStatus = "starting" | "running" | "exited" | "none";
+
+export type PaneState = {
+  paneId: string;
+  sessionId: string | null;
+  status: PaneStatus;
+  output: string;
+};
+
+export type WorkspaceState = {
+  id: string;
+  name: string;
+  rootDir: string;
+  shellProfile: string;
+  focusedPaneId: string;
+  panes: PaneState[];
+};
+
+export type DesktopState = {
+  protocolVersion: number;
+  workspaces: WorkspaceState[];
 };
 
 export function createStarterWorkspaceSnapshot(): WorkspaceSnapshot {
@@ -59,6 +83,7 @@ export function createStarterWorkspaceSummary(): WorkspaceSummary {
     id: "ws-inbox",
     name: STARTER_WORKSPACE_NAME,
     rootDir: "D:\\dev\\inbox",
+    shellProfile: "cmd.exe",
     paneCount: 1,
     splitCount: 0,
     focusedPaneId: STARTER_PANE_ID

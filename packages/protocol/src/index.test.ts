@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   APP_NAME,
+  type DesktopState,
   METADATA_REFRESH_POLICY,
+  type PaneState,
   PROTOCOL_VERSION,
   STARTER_PANE_ID,
   STARTER_WORKSPACE_NAME,
@@ -54,8 +56,34 @@ describe("protocol constants", () => {
     expect(summary.id).toBe("ws-inbox");
     expect(summary.name).toBe(STARTER_WORKSPACE_NAME);
     expect(summary.rootDir).toBe("D:\\dev\\inbox");
+    expect(summary.shellProfile).toBe("cmd.exe");
     expect(summary.paneCount).toBe(1);
     expect(summary.splitCount).toBe(0);
     expect(summary.focusedPaneId).toBe(STARTER_PANE_ID);
+  });
+
+  it("describes a desktop runtime state with pane session details", () => {
+    const pane: PaneState = {
+      paneId: "pane-1",
+      sessionId: "session:1",
+      status: "running",
+      output: "hello"
+    };
+    const state: DesktopState = {
+      protocolVersion: PROTOCOL_VERSION,
+      workspaces: [
+        {
+          id: "ws-inbox",
+          name: STARTER_WORKSPACE_NAME,
+          rootDir: "D:\\dev\\inbox",
+          shellProfile: "cmd.exe",
+          focusedPaneId: "pane-1",
+          panes: [pane]
+        }
+      ]
+    };
+
+    expect(state.workspaces[0].shellProfile).toBe("cmd.exe");
+    expect(state.workspaces[0].panes[0].status).toBe("running");
   });
 });

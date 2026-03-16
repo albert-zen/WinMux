@@ -1,94 +1,119 @@
-import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { APP_NAME, PROTOCOL_VERSION, type DesktopBootstrap } from "@cmux-win/protocol";
-import { StarterSurface } from "@cmux-win/ui";
+import { useState } from "react";
+import { APP_NAME } from "@cmux-win/protocol";
+import { useDesktopState } from "./hooks/useDesktopState";
+import { paneSplit, sessionRestart, sessionSendInput } from "./lib/desktopClient";
 import "./App.css";
 
 function App() {
-  const [bootstrap, setBootstrap] = useState<DesktopBootstrap | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { state, error } = useDesktopState();
+  const [input, setInput] = useState("");
 
-  useEffect(() => {
-    invoke<DesktopBootstrap>("desktop_bootstrap")
-      .then(setBootstrap)
-      .catch((reason) => {
-        setError(reason instanceof Error ? reason.message : String(reason));
-      });
-  }, []);
+  const workspace = state?.workspaces[0] ?? null;
+  const focusedPane =
+    workspace?.panes.find((pane) => pane.paneId === workspace.focusedPaneId) ?? null;
+
+  const handleSend = () => {
+    if (!focusedPane?.sessionId || input.trim() === "") {
+      return;
+    }
+
+    void sessionSendInput(focusedPane.sessionId, `${input}\r\n`);
+    setInput("");
+  };
+
+  const handleSplit = () => {
+    if (!workspace || !focusedPane) {
+      return;
+    }
+
+    void paneSplit(workspace.id, focusedPane.paneId, "vertical");
+  };
+
+  const handleRestart = (sessionId: string | null) => {
+    if (!sessionId) {
+      return;
+    }
+
+    void sessionRestart(sessionId);
+  };
 
   return (
-    <main className="shell">
-      <header className="page-header">
+    <main className="app-shell">
+      <header className="app-header">
         <div>
           <h1>{APP_NAME}</h1>
-          <p>Bootstrap shell with live workspace data from the Rust core.</p>
+          <p>
+            Starter workspace with a live terminal pane, split action, and restart path.
+          </p>
+        </div>
+        <div className="header-meta">
+          <span>{workspace?.name ?? "loading"}</span>
+          <span>{workspace?.shellProfile ?? "waiting"}</span>
         </div>
       </header>
 
-      <StarterSurface
-        title="Desktop Bootstrap"
-        subtitle="The desktop app is reading shared TypeScript and Rust state instead of a static template."
-        metrics={[
-          { label: "Protocol", value: `v${bootstrap?.protocolVersion ?? PROTOCOL_VERSION}` },
-          { label: "Starter workspace", value: bootstrap?.starterWorkspaceName ?? "loading" },
-          { label: "Pane count", value: String(bootstrap?.starterPaneCount ?? 0) },
-          { label: "Split count", value: String(bootstrap?.starterSplitCount ?? 0) }
-        ]}
-      />
+      {workspace ? (
+        <section className="workspace-panel">
+          <div className="workspace-toolbar">
+            <div>
+              <strong>{workspace.rootDir}</strong>
+              <span>{workspace.panes.length} panes</span>
+            </div>
+            <button type="button" onClick={handleSplit}>
+              Split Right
+            </button>
+          </div>
 
-      <section className="workspace-section">
-        <div className="section-head">
-          <h2>Workspaces</h2>
-          <p>Current starter state returned from Tauri and `core-state`.</p>
-        </div>
-        <div className="workspace-list" role="list">
-          {(bootstrap?.workspaces ?? []).map((workspace) => (
-            <article className="workspace-row" key={workspace.id} role="listitem">
-              <div className="workspace-main">
-                <strong>{workspace.name}</strong>
-                <span>{workspace.rootDir}</span>
-              </div>
-              <dl className="workspace-meta">
-                <div>
-                  <dt>Panes</dt>
-                  <dd>{workspace.paneCount}</dd>
-                </div>
-                <div>
-                  <dt>Splits</dt>
-                  <dd>{workspace.splitCount}</dd>
-                </div>
-                <div>
-                  <dt>Focus</dt>
-                  <dd>{workspace.focusedPaneId}</dd>
-                </div>
-              </dl>
-            </article>
-          ))}
-        </div>
-      </section>
+          <div className="pane-grid">
+            {workspace.panes.map((pane) => {
+              const isFocused = pane.paneId === workspace.focusedPaneId;
 
-      <section className="status-grid">
-        <article className="status-card">
-          <h2>Current wiring</h2>
-          <ul>
-            <li>Workspace and layout state now round-trips through Rust</li>
-            <li>IPC request envelopes validate three real command shapes</li>
-            <li>CLI emits request JSON for the supported commands</li>
-            <li>Session lifecycle lives in a dedicated Rust domain crate</li>
-          </ul>
-        </article>
-        <article className="status-card">
-          <h2>Next focus</h2>
-          <ul>
-            <li>Hook desktop commands into the live workspace registry</li>
-            <li>Attach ConPTY-backed session execution</li>
-            <li>Replace JSON-printing CLI with transport-backed requests</li>
-            <li>Render real pane trees instead of summary rows</li>
-          </ul>
-        </article>
-      </section>
+              return (
+                <article
+                  className={`pane-card${isFocused ? " pane-card-focused" : ""}`}
+                  key={pane.paneId}
+                >
+                  <div className="pane-head">
+                    <div>
+                      <strong>{pane.paneId}</strong>
+                      <span>{pane.sessionId ?? "no session"}</span>
+                    </div>
+                    <div className={`pane-status pane-status-${pane.status}`}>{pane.status}</div>
+                  </div>
+                  <pre className="pane-output">{pane.output}</pre>
+                  {pane.status === "exited" ? (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => handleRestart(pane.sessionId)}
+                    >
+                      Restart
+                    </button>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
 
-      {error ? <p className="error">Rust bootstrap failed: {error}</p> : null}
+          <div className="pane-input-row">
+            <input
+              aria-label="Terminal input"
+              placeholder="Type a command"
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+            />
+            <button type="button" onClick={handleSend}>
+              Send
+            </button>
+          </div>
+        </section>
+      ) : (
+        <section className="workspace-panel workspace-panel-empty">
+          <p>Waiting for desktop state…</p>
+        </section>
+      )}
+
+      {error ? <p className="error-text">{error}</p> : null}
     </main>
   );
 }

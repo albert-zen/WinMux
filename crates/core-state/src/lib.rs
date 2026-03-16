@@ -46,6 +46,7 @@ pub struct WorkspaceSummary {
     pub id: String,
     pub name: String,
     pub root_dir: String,
+    pub shell_profile: String,
     pub pane_count: usize,
     pub split_count: usize,
     pub focused_pane_id: String,
@@ -73,6 +74,7 @@ pub fn starter_workspace_registry() -> WorkspaceRegistry {
         "ws-inbox",
         STARTER_WORKSPACE_NAME,
         "D:\\dev\\inbox",
+        "cmd.exe",
         WorkspaceLayout::starter(),
     )
     .expect("starter workspace id should be unique");
@@ -136,6 +138,7 @@ pub struct WorkspaceRecord {
     pub id: String,
     pub name: String,
     pub root_dir: String,
+    pub shell_profile: String,
     pub layout: WorkspaceLayout,
 }
 
@@ -171,6 +174,7 @@ impl WorkspaceRegistry {
         id: impl Into<String>,
         name: impl Into<String>,
         root_dir: impl Into<String>,
+        shell_profile: impl Into<String>,
         layout: WorkspaceLayout,
     ) -> Result<(), WorkspaceError> {
         let id = id.into();
@@ -183,6 +187,7 @@ impl WorkspaceRegistry {
             id,
             name: name.into(),
             root_dir: root_dir.into(),
+            shell_profile: shell_profile.into(),
             layout,
         });
 
@@ -245,6 +250,7 @@ impl WorkspaceRecord {
             id: self.id.clone(),
             name: self.name.clone(),
             root_dir: self.root_dir.clone(),
+            shell_profile: self.shell_profile.clone(),
             pane_count: snapshot.pane_count,
             split_count: snapshot.split_count,
             focused_pane_id: self.layout.focused_pane_id.clone(),
@@ -274,6 +280,7 @@ mod tests {
         assert_eq!(bootstrap.workspaces.len(), 1);
         assert_eq!(bootstrap.workspaces[0].id, "ws-inbox");
         assert_eq!(bootstrap.workspaces[0].root_dir, "D:\\dev\\inbox");
+        assert_eq!(bootstrap.workspaces[0].shell_profile, "cmd.exe");
     }
 
     #[test]
@@ -320,9 +327,9 @@ mod tests {
 
     fn make_registry_with_two() -> WorkspaceRegistry {
         let mut reg = WorkspaceRegistry::new();
-        reg.create("ws-a", "Alpha", "/home/alpha", WorkspaceLayout::starter())
+        reg.create("ws-a", "Alpha", "/home/alpha", "pwsh", WorkspaceLayout::starter())
             .expect("ws-a should be unique");
-        reg.create("ws-b", "Beta", "/home/beta", WorkspaceLayout::starter())
+        reg.create("ws-b", "Beta", "/home/beta", "cmd.exe", WorkspaceLayout::starter())
             .expect("ws-b should be unique");
         reg
     }
@@ -336,8 +343,10 @@ mod tests {
         assert_eq!(list[0].id, "ws-a");
         assert_eq!(list[0].name, "Alpha");
         assert_eq!(list[0].root_dir, "/home/alpha");
+        assert_eq!(list[0].shell_profile, "pwsh");
         assert_eq!(list[1].id, "ws-b");
         assert_eq!(list[1].name, "Beta");
+        assert_eq!(list[1].shell_profile, "cmd.exe");
     }
 
     #[test]
@@ -425,20 +434,21 @@ mod tests {
     fn workspace_record_stores_correct_fields() {
         let layout = WorkspaceLayout::starter();
         let mut reg = WorkspaceRegistry::new();
-        reg.create("ws-x", "X project", "/srv/x", layout.clone())
+        reg.create("ws-x", "X project", "/srv/x", "pwsh", layout.clone())
             .expect("workspace should be unique");
 
         let record = &reg.list()[0];
         assert_eq!(record.id, "ws-x");
         assert_eq!(record.name, "X project");
         assert_eq!(record.root_dir, "/srv/x");
+        assert_eq!(record.shell_profile, "pwsh");
         assert_eq!(record.layout, layout);
     }
 
     #[test]
     fn summaries_project_live_layout_fields() {
         let mut reg = WorkspaceRegistry::new();
-        reg.create("ws-x", "X project", "/srv/x", WorkspaceLayout::starter())
+        reg.create("ws-x", "X project", "/srv/x", "pwsh", WorkspaceLayout::starter())
             .expect("workspace should be unique");
         reg.split_pane("ws-x", "pane-1", "pane-2", SplitOrientation::Vertical, 0.5)
             .expect("split should succeed");
@@ -449,6 +459,7 @@ mod tests {
         assert_eq!(summaries[0].id, "ws-x");
         assert_eq!(summaries[0].name, "X project");
         assert_eq!(summaries[0].root_dir, "/srv/x");
+        assert_eq!(summaries[0].shell_profile, "pwsh");
         assert_eq!(summaries[0].pane_count, 2);
         assert_eq!(summaries[0].split_count, 1);
         assert_eq!(summaries[0].focused_pane_id, "pane-2");
@@ -463,16 +474,23 @@ mod tests {
         assert_eq!(workspaces[0].id, "ws-inbox");
         assert_eq!(workspaces[0].name, STARTER_WORKSPACE_NAME);
         assert_eq!(workspaces[0].root_dir, "D:\\dev\\inbox");
+        assert_eq!(workspaces[0].shell_profile, "cmd.exe");
         assert_eq!(workspaces[0].layout.snapshot().pane_count, 1);
     }
 
     #[test]
     fn create_rejects_duplicate_workspace_ids() {
         let mut reg = WorkspaceRegistry::new();
-        reg.create("ws-x", "X project", "/srv/x", WorkspaceLayout::starter())
+        reg.create("ws-x", "X project", "/srv/x", "pwsh", WorkspaceLayout::starter())
             .expect("first insert should work");
 
-        let duplicate = reg.create("ws-x", "Another", "/srv/other", WorkspaceLayout::starter());
+        let duplicate = reg.create(
+            "ws-x",
+            "Another",
+            "/srv/other",
+            "cmd.exe",
+            WorkspaceLayout::starter(),
+        );
 
         assert_eq!(duplicate, Err(WorkspaceError::DuplicateWorkspaceId));
         assert_eq!(reg.list().len(), 1);

@@ -318,7 +318,9 @@ pub fn validate_request(request: &RequestEnvelope) -> Result<(), ProtocolError> 
         "session.start" => validate_session_start_payload(&request.payload),
         "session.sendInput" => validate_session_send_input_payload(&request.payload),
         "session.resize" => validate_session_resize_payload(&request.payload),
+        "session.restart" => validate_session_restart_payload(&request.payload),
         "session.getStatus" => validate_session_get_status_payload(&request.payload),
+        "app.getState" => validate_app_get_state_payload(&request.payload),
         "notify.send" => validate_notify_payload(&request.payload),
         _ => Err(ProtocolError::new(
             ErrorCode::Unsupported,
@@ -436,6 +438,17 @@ fn validate_session_resize_payload(payload: &Value) -> Result<(), ProtocolError>
 fn validate_session_get_status_payload(payload: &Value) -> Result<(), ProtocolError> {
     let object = payload_object(payload)?;
     required_string_field(object, "sessionId")?;
+    Ok(())
+}
+
+fn validate_session_restart_payload(payload: &Value) -> Result<(), ProtocolError> {
+    let object = payload_object(payload)?;
+    required_string_field(object, "sessionId")?;
+    Ok(())
+}
+
+fn validate_app_get_state_payload(payload: &Value) -> Result<(), ProtocolError> {
+    payload_object(payload)?;
     Ok(())
 }
 
@@ -1173,9 +1186,10 @@ fn handle_workspace_create(
     let p = request.payload();
     let name = p["name"].as_str().unwrap_or_default();
     let root_dir = p["rootDir"].as_str().unwrap_or_default();
+    let shell_profile = p["shellProfile"].as_str().unwrap_or_default();
 
     let id = new_workspace_id();
-    match registry.create(&id, name, root_dir, WorkspaceLayout::starter()) {
+    match registry.create(&id, name, root_dir, shell_profile, WorkspaceLayout::starter()) {
         Ok(()) => ResponseEnvelope::success(request.id(), serde_json::json!({ "workspaceId": id })),
         Err(WorkspaceError::DuplicateWorkspaceId) => ResponseEnvelope::error(
             request.id(),

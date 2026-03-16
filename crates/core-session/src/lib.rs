@@ -211,6 +211,7 @@ pub struct SessionSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionRuntimeError {
     SessionNotFound,
+    SessionNotExited,
     PaneAlreadyBound,
     Host(String),
 }
@@ -219,6 +220,7 @@ impl fmt::Display for SessionRuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SessionRuntimeError::SessionNotFound => write!(f, "session not found"),
+            SessionRuntimeError::SessionNotExited => write!(f, "session has not exited"),
             SessionRuntimeError::PaneAlreadyBound => {
                 write!(f, "pane already has an active session")
             }
@@ -245,6 +247,7 @@ struct LiveSession {
     workspace_id: String,
     pane_id: String,
     record: SessionRecord,
+    size: TerminalSize,
     host: Box<dyn SessionHost>,
 }
 
@@ -293,6 +296,7 @@ where
         size: TerminalSize,
     ) -> Result<String, SessionRuntimeError> {
         let binding = (workspace_id.to_string(), pane_id.to_string());
+        self.prune_exited_sessions_for_pane(workspace_id, pane_id)?;
         if let Some(existing_session_id) = self.pane_bindings.get(&binding).cloned() {
             if let Some(existing_session) = self.sessions.get_mut(&existing_session_id) {
                 Self::refresh_exit_state(existing_session)?;
@@ -330,12 +334,52 @@ where
                 workspace_id: workspace_id.to_string(),
                 pane_id: pane_id.to_string(),
                 record,
+                size,
                 host,
             },
         );
         self.pane_bindings.insert(binding, session_id.clone());
 
         Ok(session_id)
+    }
+
+    fn prune_exited_sessions_for_pane(
+        &mut self,
+        workspace_id: &str,
+        pane_id: &str,
+    ) -> Result<(), SessionRuntimeError> {
+        let stale_ids = self
+            .sessions
+            .iter_mut()
+            .filter_map(|(session_id, session)| {
+                if session.workspace_id == workspace_id && session.pane_id == pane_id {
+                    Some(session_id.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        for session_id in stale_ids {
+            let should_remove = if let Some(session) = self.sessions.get_mut(&session_id) {
+                Self::refresh_exit_state(session)?;
+                matches!(session.record.status, SessionStatus::Exited { .. })
+            } else {
+                false
+            };
+
+            if should_remove {
+                if self.pane_bindings.get(&(workspace_id.to_string(), pane_id.to_string()))
+                    == Some(&session_id)
+                {
+                    self.pane_bindings
+                        .remove(&(workspace_id.to_string(), pane_id.to_string()));
+                }
+                self.sessions.remove(&session_id);
+            }
+        }
+
+        Ok(())
     }
 
     pub fn send_input(
@@ -395,6 +439,54 @@ where
             exit_code,
             output: String::from_utf8_lossy(&session.host.collected_output()).into_owned(),
         })
+    }
+
+    pub fn restart(&mut self, session_id: &str) -> Result<String, SessionRuntimeError> {
+        let (workspace_id, pane_id, spec, size) = {
+            let session = self
+                .sessions
+                .get_mut(session_id)
+                .ok_or(SessionRuntimeError::SessionNotFound)?;
+
+            Self::refresh_exit_state(session)?;
+            if !matches!(session.record.status, SessionStatus::Exited { .. }) {
+                return Err(SessionRuntimeError::SessionNotExited);
+            }
+
+            (
+                session.workspace_id.clone(),
+                session.pane_id.clone(),
+                session.record.spec.clone(),
+                session.size,
+            )
+        };
+
+        self.sessions.remove(session_id);
+        self.pane_bindings
+            .remove(&(workspace_id.clone(), pane_id.clone()));
+
+        self.start(&workspace_id, &pane_id, spec, size)
+    }
+
+    #[must_use]
+    pub fn snapshot(&mut self) -> Vec<SessionSnapshot> {
+        let mut snapshots = self
+            .sessions
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .filter_map(|session_id| self.get_status(&session_id).ok())
+            .collect::<Vec<_>>();
+        snapshots.sort_by_key(|snapshot| {
+            snapshot
+                .session_id
+                .split(':')
+                .nth(1)
+                .and_then(|suffix| suffix.parse::<u64>().ok())
+                .unwrap_or(0)
+        });
+        snapshots
     }
 
     #[must_use]
@@ -766,6 +858,85 @@ mod tests {
             .unwrap();
 
         assert_eq!(second_session, "session:2");
+    }
+
+    #[test]
+    fn live_registry_restart_spawns_new_host_and_returns_new_session_id() {
+        let factory = FakeFactory::default();
+        factory.state.lock().unwrap().next_wait = Some(true);
+        let mut registry = LiveSessionRegistry::new(factory.clone());
+        let first_session = registry
+            .start(
+                "ws-1",
+                "pane-1",
+                SessionSpec::new("shell", "pwsh"),
+                TerminalSize { rows: 24, cols: 80 },
+            )
+            .unwrap();
+
+        let snapshot = registry.get_status(&first_session).unwrap();
+        assert_eq!(snapshot.status, "exited");
+
+        let restarted = registry
+            .restart(&first_session)
+            .expect("exited session should restart");
+
+        assert_eq!(restarted, "session:2");
+        assert_eq!(registry.session_id_for_pane("ws-1", "pane-1"), Some("session:2"));
+        assert_eq!(
+            factory.state.lock().unwrap().spawn_commands,
+            vec!["pwsh".to_string(), "pwsh".to_string()]
+        );
+    }
+
+    #[test]
+    fn live_registry_restart_rejects_running_sessions() {
+        let factory = FakeFactory::default();
+        let mut registry = LiveSessionRegistry::new(factory);
+        let session_id = registry
+            .start(
+                "ws-1",
+                "pane-1",
+                SessionSpec::new("shell", "pwsh"),
+                TerminalSize { rows: 24, cols: 80 },
+            )
+            .unwrap();
+
+        let err = registry.restart(&session_id).unwrap_err();
+
+        assert_eq!(err, SessionRuntimeError::SessionNotExited);
+    }
+
+    #[test]
+    fn live_registry_start_prunes_exited_sessions_for_the_same_pane() {
+        let factory = FakeFactory::default();
+        factory.state.lock().unwrap().next_wait = Some(true);
+        let mut registry = LiveSessionRegistry::new(factory);
+        let first_session = registry
+            .start(
+                "ws-1",
+                "pane-1",
+                SessionSpec::new("shell", "pwsh"),
+                TerminalSize { rows: 24, cols: 80 },
+            )
+            .unwrap();
+
+        let snapshot = registry.get_status(&first_session).unwrap();
+        assert_eq!(snapshot.status, "exited");
+
+        let second_session = registry
+            .start(
+                "ws-1",
+                "pane-1",
+                SessionSpec::new("shell", "cmd.exe"),
+                TerminalSize { rows: 24, cols: 80 },
+            )
+            .unwrap();
+
+        let all_sessions = registry.snapshot();
+        assert_eq!(second_session, "session:2");
+        assert_eq!(all_sessions.len(), 1);
+        assert_eq!(all_sessions[0].session_id, "session:2");
     }
 
     #[test]

@@ -3,8 +3,8 @@
   font-size: 16px;
   line-height: 1.5;
   font-weight: 400;
-  color: #edf0ea;
-  background: #121615;
+  color: #ece8df;
+  background: #151311;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -17,203 +17,209 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: #121615;
+  background: #151311;
 }
 
 #root {
   min-height: 100vh;
 }
 
-.shell {
-  min-height: 100vh;
-  padding: 32px 28px 40px;
-  display: grid;
-  gap: 20px;
-  max-width: 1120px;
-  margin: 0 auto;
+button,
+input {
+  font: inherit;
 }
 
-.page-header {
+.app-shell {
+  max-width: 1180px;
+  margin: 0 auto;
+  min-height: 100vh;
+  padding: 24px;
+  display: grid;
+  gap: 18px;
+}
+
+.app-header,
+.workspace-panel {
+  background: #1c1917;
+  border: 1px solid #322c27;
+  border-radius: 10px;
+}
+
+.app-header {
+  padding: 18px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.8rem;
+  line-height: 1.05;
+}
+
+.app-header p,
+.header-meta span,
+.workspace-toolbar span,
+.pane-head span,
+.error-text {
+  color: #b9b0a4;
+}
+
+.app-header p {
+  margin: 6px 0 0;
+}
+
+.header-meta {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 0.88rem;
+}
+
+.workspace-panel {
+  padding: 18px;
+  display: grid;
+  gap: 16px;
+}
+
+.workspace-panel-empty {
+  min-height: 240px;
+  place-items: center;
+}
+
+.workspace-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.workspace-toolbar strong,
+.pane-head strong {
+  display: block;
+}
+
+.workspace-toolbar button,
+.pane-input-row button,
+.secondary-button {
+  background: #7b4b2a;
+  color: #f6efe7;
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+
+.secondary-button {
+  background: #2f2924;
+  border: 1px solid #443a32;
+}
+
+.pane-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.pane-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 10px;
+  background: #201c19;
+  border: 1px solid #342d27;
+}
+
+.pane-card-focused {
+  border-color: #7b4b2a;
+}
+
+.pane-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-}
-
-.page-header h1 {
-  margin: 0;
-  font-size: 1.9rem;
-  line-height: 1.1;
-}
-
-.page-header p {
-  margin: 6px 0 0;
-  color: #aeb8b1;
-}
-
-.starter-surface {
-  padding: 20px;
-  border: 1px solid #2a312e;
-  border-radius: 10px;
-  background: #181d1c;
-}
-
-.starter-surface h2,
-.status-card h2,
-.section-head h2 {
-  margin: 0 0 8px;
-  font-size: 1rem;
-}
-
-.starter-surface p,
-.status-card li,
-.section-head p,
-.workspace-main span,
-.workspace-meta dt {
-  color: #aeb8b1;
-}
-
-.metric-grid,
-.status-grid,
-.workspace-meta {
-  display: grid;
   gap: 12px;
 }
 
-.metric-grid {
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  margin-top: 16px;
+.pane-status {
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 0.8rem;
+  text-transform: lowercase;
 }
 
-.metric {
+.pane-status-running {
+  color: #a5d6a7;
+}
+
+.pane-status-starting {
+  color: #d4c08a;
+}
+
+.pane-status-exited {
+  color: #f0b48f;
+}
+
+.pane-status-none {
+  color: #b9b0a4;
+}
+
+.pane-output {
+  margin: 0;
+  min-height: 220px;
   padding: 12px;
   border-radius: 8px;
-  background: #202725;
-  border: 1px solid #29312e;
-}
-
-.metric-label {
-  display: block;
-  margin-bottom: 4px;
-  font-size: 0.8rem;
-  color: #91a69a;
-}
-
-.metric-value {
+  background: #11100f;
+  border: 1px solid #2e2823;
+  color: #f1ede8;
   font-family: "Cascadia Code", "Consolas", monospace;
-  font-size: 1rem;
+  font-size: 0.9rem;
+  white-space: pre-wrap;
+  overflow: auto;
 }
 
-.status-grid {
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-}
-
-.status-card {
-  padding: 18px;
-  border-radius: 10px;
-  background: #181d1c;
-  border: 1px solid #2a312e;
-}
-
-.status-card ul {
-  margin: 0;
-  padding-left: 18px;
-}
-
-.workspace-section {
-  padding: 18px;
-  border-radius: 10px;
-  background: #181d1c;
-  border: 1px solid #2a312e;
-}
-
-.section-head {
-  margin-bottom: 14px;
-}
-
-.section-head p {
-  margin: 0;
-}
-
-.workspace-list {
+.pane-input-row {
   display: grid;
-  gap: 10px;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
 }
 
-.workspace-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-  gap: 16px;
-  align-items: center;
-  padding: 14px 0;
-  border-top: 1px solid #232a27;
-}
-
-.workspace-row:first-child {
-  border-top: 0;
-  padding-top: 0;
-}
-
-.workspace-main {
+.pane-input-row input {
   min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.workspace-main strong {
-  font-size: 1rem;
-  font-weight: 600;
-}
-
-.workspace-main span {
-  font-family: "Cascadia Code", "Consolas", monospace;
-  font-size: 0.88rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.workspace-meta {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.workspace-meta div {
-  padding: 8px 10px;
+  padding: 11px 12px;
   border-radius: 8px;
-  background: #202725;
-  border: 1px solid #29312e;
+  border: 1px solid #41372f;
+  background: #171412;
+  color: #f1ede8;
 }
 
-.workspace-meta dt,
-.workspace-meta dd {
+.pane-input-row input:focus {
+  outline: 2px solid #7b4b2a;
+  outline-offset: 1px;
+}
+
+.error-text {
   margin: 0;
-}
-
-.workspace-meta dt {
-  font-size: 0.76rem;
-}
-
-.workspace-meta dd {
-  margin-top: 4px;
-  font-family: "Cascadia Code", "Consolas", monospace;
-  font-size: 0.92rem;
-}
-
-.error {
-  margin: 0;
-  color: #ffb8a2;
 }
 
 @media (max-width: 720px) {
-  .shell {
-    padding: 24px 16px 32px;
+  .app-shell {
+    padding: 16px;
   }
 
-  .workspace-row {
+  .app-header,
+  .workspace-toolbar {
     grid-template-columns: 1fr;
+    display: grid;
   }
 
-  .workspace-meta {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .header-meta {
+    justify-items: start;
+  }
+
+  .pane-input-row {
+    grid-template-columns: 1fr;
   }
 }
