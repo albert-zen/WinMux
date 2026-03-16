@@ -2,7 +2,9 @@ import { render, screen } from "@testing-library/react";
 import { act } from "react";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useDesktopState } from "./useDesktopState";
+import { SESSION_OUTPUT_EVENT } from "@cmux-win/protocol";
 
 function HookProbe() {
   const { state, error } = useDesktopState();
@@ -40,6 +42,7 @@ describe("useDesktopState", () => {
     await flushMicrotasks();
 
     expect(invoke).toHaveBeenCalledWith("desktop_state");
+    expect(listen).toHaveBeenCalledWith(SESSION_OUTPUT_EVENT, expect.any(Function));
   });
 
   it("polls desktop_state on the refresh interval", async () => {
@@ -88,5 +91,114 @@ describe("useDesktopState", () => {
     await flushMicrotasks();
 
     expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("merges session.output events into matching pane output", async () => {
+    let eventHandler:
+      | ((event: {
+          payload: {
+            workspaceId: string;
+            paneId: string;
+            sessionId: string;
+            chunk: string;
+          };
+        }) => void)
+      | undefined;
+
+    vi.mocked(invoke).mockResolvedValue({
+      protocolVersion: 1,
+      workspaces: [
+        {
+          id: "ws-inbox",
+          name: "inbox",
+          rootDir: "D:\\dev\\inbox",
+          shellProfile: "cmd.exe",
+          focusedPaneId: "pane-1",
+          panes: [
+            {
+              paneId: "pane-1",
+              sessionId: "session:1",
+              status: "running",
+              output: "hello",
+            },
+          ],
+        },
+      ],
+    });
+    vi.mocked(listen).mockImplementation(async (_eventName, handler) => {
+      eventHandler = handler as typeof eventHandler;
+      return vi.fn();
+    });
+
+    render(<HookProbe />);
+    await flushMicrotasks();
+
+    await act(async () => {
+      eventHandler?.({
+        payload: {
+          workspaceId: "ws-inbox",
+          paneId: "pane-1",
+          sessionId: "session:1",
+          chunk: "\r\nworld",
+        },
+      });
+    });
+
+    expect(screen.getByTestId("state").textContent).toContain("hello\\r\\nworld");
+  });
+
+  it("ignores session.output events for a stale session id", async () => {
+    let eventHandler:
+      | ((event: {
+          payload: {
+            workspaceId: string;
+            paneId: string;
+            sessionId: string;
+            chunk: string;
+          };
+        }) => void)
+      | undefined;
+
+    vi.mocked(invoke).mockResolvedValue({
+      protocolVersion: 1,
+      workspaces: [
+        {
+          id: "ws-inbox",
+          name: "inbox",
+          rootDir: "D:\\dev\\inbox",
+          shellProfile: "cmd.exe",
+          focusedPaneId: "pane-1",
+          panes: [
+            {
+              paneId: "pane-1",
+              sessionId: "session:2",
+              status: "running",
+              output: "fresh",
+            },
+          ],
+        },
+      ],
+    });
+    vi.mocked(listen).mockImplementation(async (_eventName, handler) => {
+      eventHandler = handler as typeof eventHandler;
+      return vi.fn();
+    });
+
+    render(<HookProbe />);
+    await flushMicrotasks();
+
+    await act(async () => {
+      eventHandler?.({
+        payload: {
+          workspaceId: "ws-inbox",
+          paneId: "pane-1",
+          sessionId: "session:1",
+          chunk: "\r\nstale",
+        },
+      });
+    });
+
+    expect(screen.getByTestId("state").textContent).toContain("\"output\":\"fresh\"");
+    expect(screen.getByTestId("state").textContent).not.toContain("stale");
   });
 });

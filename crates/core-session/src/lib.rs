@@ -209,6 +209,15 @@ pub struct SessionSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionOutputEvent {
+    pub session_id: String,
+    pub workspace_id: String,
+    pub pane_id: String,
+    pub chunk: String,
+    cursor_start: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionRuntimeError {
     SessionNotFound,
     SessionNotExited,
@@ -248,6 +257,7 @@ struct LiveSession {
     pane_id: String,
     record: SessionRecord,
     size: TerminalSize,
+    emitted_output_bytes: usize,
     host: Box<dyn SessionHost>,
 }
 
@@ -335,6 +345,7 @@ where
                 pane_id: pane_id.to_string(),
                 record,
                 size,
+                emitted_output_bytes: 0,
                 host,
             },
         );
@@ -468,6 +479,69 @@ where
         self.start(&workspace_id, &pane_id, spec, size)
     }
 
+    pub fn drain_output_events(&mut self) -> Result<Vec<SessionOutputEvent>, SessionRuntimeError> {
+        let mut session_ids = self.sessions.keys().cloned().collect::<Vec<_>>();
+        session_ids.sort_by_key(|session_id| {
+            session_id
+                .split(':')
+                .nth(1)
+                .and_then(|suffix| suffix.parse::<u64>().ok())
+                .unwrap_or(0)
+        });
+
+        let mut events = Vec::new();
+        let mut cursor_updates = Vec::<(String, usize)>::new();
+
+        for session_id in session_ids {
+            let Some(session) = self.sessions.get_mut(&session_id) else {
+                continue;
+            };
+
+            Self::refresh_exit_state(session)?;
+            let output = session.host.collected_output();
+            if output.len() < session.emitted_output_bytes {
+                cursor_updates.push((session_id, output.len()));
+                continue;
+            }
+
+            if output.len() == session.emitted_output_bytes {
+                continue;
+            }
+
+            let chunk =
+                String::from_utf8_lossy(&output[session.emitted_output_bytes..]).into_owned();
+            cursor_updates.push((session_id.clone(), output.len()));
+
+            if chunk.is_empty() {
+                continue;
+            }
+
+            events.push(SessionOutputEvent {
+                session_id: session.record.id.to_string(),
+                workspace_id: session.workspace_id.clone(),
+                pane_id: session.pane_id.clone(),
+                chunk,
+                cursor_start: session.emitted_output_bytes,
+            });
+        }
+
+        for (session_id, emitted_output_bytes) in cursor_updates {
+            if let Some(session) = self.sessions.get_mut(&session_id) {
+                session.emitted_output_bytes = emitted_output_bytes;
+            }
+        }
+
+        Ok(events)
+    }
+
+    pub fn rollback_output_events(&mut self, events: &[SessionOutputEvent]) {
+        for event in events {
+            if let Some(session) = self.sessions.get_mut(&event.session_id) {
+                session.emitted_output_bytes = event.cursor_start;
+            }
+        }
+    }
+
     #[must_use]
     pub fn snapshot(&mut self) -> Vec<SessionSnapshot> {
         let mut snapshots = self
@@ -565,7 +639,7 @@ mod tests {
         spawn_commands: Vec<String>,
         writes: Vec<Vec<u8>>,
         resizes: Vec<TerminalSize>,
-        output: Vec<u8>,
+        outputs: Vec<Arc<Mutex<Vec<u8>>>>,
         next_wait: Option<bool>,
     }
 
@@ -576,13 +650,13 @@ mod tests {
 
     struct FakeHost {
         state: Arc<Mutex<FakeFactoryState>>,
+        output: Arc<Mutex<Vec<u8>>>,
     }
 
     impl SessionHost for FakeHost {
         fn write_input(&mut self, data: &[u8]) -> Result<(), String> {
-            let mut state = self.state.lock().unwrap();
-            state.writes.push(data.to_vec());
-            state.output.extend_from_slice(data);
+            self.state.lock().unwrap().writes.push(data.to_vec());
+            self.output.lock().unwrap().extend_from_slice(data);
             Ok(())
         }
 
@@ -596,7 +670,7 @@ mod tests {
         }
 
         fn collected_output(&self) -> Vec<u8> {
-            self.state.lock().unwrap().output.clone()
+            self.output.lock().unwrap().clone()
         }
     }
 
@@ -606,13 +680,13 @@ mod tests {
             spec: &SessionSpec,
             _size: TerminalSize,
         ) -> Result<Box<dyn SessionHost>, String> {
-            self.state
-                .lock()
-                .unwrap()
-                .spawn_commands
-                .push(spec.command.clone());
+            let output = Arc::new(Mutex::new(Vec::new()));
+            let mut state = self.state.lock().unwrap();
+            state.outputs.push(Arc::clone(&output));
+            state.spawn_commands.push(spec.command.clone());
             Ok(Box::new(FakeHost {
                 state: Arc::clone(&self.state),
+                output,
             }))
         }
     }
@@ -937,6 +1011,140 @@ mod tests {
         assert_eq!(second_session, "session:2");
         assert_eq!(all_sessions.len(), 1);
         assert_eq!(all_sessions[0].session_id, "session:2");
+    }
+
+    #[test]
+    fn live_registry_drain_output_events_emits_only_new_chunks() {
+        let factory = FakeFactory::default();
+        let mut registry = LiveSessionRegistry::new(factory);
+        let session_id = registry
+            .start(
+                "ws-1",
+                "pane-1",
+                SessionSpec::new("shell", "pwsh"),
+                TerminalSize { rows: 24, cols: 80 },
+            )
+            .unwrap();
+
+        registry.send_input(&session_id, b"echo one\r\n").unwrap();
+        let first = registry.drain_output_events().unwrap();
+        let second = registry.drain_output_events().unwrap();
+
+        assert_eq!(
+            first,
+            vec![SessionOutputEvent {
+                session_id: "session:1".to_string(),
+                workspace_id: "ws-1".to_string(),
+                pane_id: "pane-1".to_string(),
+                chunk: "echo one\r\n".to_string(),
+                cursor_start: 0,
+            }]
+        );
+        assert!(second.is_empty());
+
+        registry.send_input(&session_id, b"echo two\r\n").unwrap();
+        let third = registry.drain_output_events().unwrap();
+        assert_eq!(third.len(), 1);
+        assert_eq!(third[0].chunk, "echo two\r\n");
+    }
+
+    #[test]
+    fn live_registry_drain_output_events_preserves_session_order() {
+        let factory = FakeFactory::default();
+        let mut registry = LiveSessionRegistry::new(factory);
+        let first_session = registry
+            .start(
+                "ws-1",
+                "pane-1",
+                SessionSpec::new("shell", "pwsh"),
+                TerminalSize { rows: 24, cols: 80 },
+            )
+            .unwrap();
+        let second_session = registry
+            .start(
+                "ws-1",
+                "pane-2",
+                SessionSpec::new("shell", "cmd.exe"),
+                TerminalSize { rows: 24, cols: 80 },
+            )
+            .unwrap();
+
+        registry.send_input(&second_session, b"second\r\n").unwrap();
+        registry.send_input(&first_session, b"first\r\n").unwrap();
+
+        let events = registry.drain_output_events().unwrap();
+        let session_ids = events
+            .iter()
+            .map(|event| event.session_id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(session_ids, vec!["session:1", "session:2"]);
+        assert_eq!(events[0].chunk, "first\r\n");
+        assert_eq!(events[1].chunk, "second\r\n");
+    }
+
+    #[test]
+    fn live_registry_drain_output_events_does_not_reemit_after_output_shrinks() {
+        let factory = FakeFactory::default();
+        let mut registry = LiveSessionRegistry::new(factory.clone());
+        let session_id = registry
+            .start(
+                "ws-1",
+                "pane-1",
+                SessionSpec::new("shell", "pwsh"),
+                TerminalSize { rows: 24, cols: 80 },
+            )
+            .unwrap();
+
+        registry.send_input(&session_id, b"first\r\n").unwrap();
+        let first = registry.drain_output_events().unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].chunk, "first\r\n");
+
+        {
+            let output = factory.state.lock().unwrap().outputs[0].clone();
+            output.lock().unwrap().clear();
+        }
+
+        assert!(registry.drain_output_events().unwrap().is_empty());
+
+        registry.send_input(&session_id, b"second\r\n").unwrap();
+        let second = registry.drain_output_events().unwrap();
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].chunk, "second\r\n");
+    }
+
+    #[test]
+    fn live_registry_can_rollback_undelivered_output_events() {
+        let factory = FakeFactory::default();
+        let mut registry = LiveSessionRegistry::new(factory);
+        let first_session = registry
+            .start(
+                "ws-1",
+                "pane-1",
+                SessionSpec::new("shell", "pwsh"),
+                TerminalSize { rows: 24, cols: 80 },
+            )
+            .unwrap();
+        let second_session = registry
+            .start(
+                "ws-1",
+                "pane-2",
+                SessionSpec::new("shell", "cmd.exe"),
+                TerminalSize { rows: 24, cols: 80 },
+            )
+            .unwrap();
+
+        registry.send_input(&first_session, b"first\r\n").unwrap();
+        registry.send_input(&second_session, b"second\r\n").unwrap();
+
+        let events = registry.drain_output_events().unwrap();
+        registry.rollback_output_events(&events[1..]);
+
+        let replayed = registry.drain_output_events().unwrap();
+        assert_eq!(replayed.len(), 1);
+        assert_eq!(replayed[0].session_id, second_session);
+        assert_eq!(replayed[0].chunk, "second\r\n");
     }
 
     #[test]

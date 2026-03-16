@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { METADATA_REFRESH_POLICY, type DesktopState } from "@cmux-win/protocol";
+import { listen } from "@tauri-apps/api/event";
+import {
+  METADATA_REFRESH_POLICY,
+  SESSION_OUTPUT_EVENT,
+  type DesktopState,
+  type SessionOutputEvent,
+} from "@cmux-win/protocol";
 
 type UseDesktopStateResult = {
   state: DesktopState | null;
@@ -30,9 +36,34 @@ export function useDesktopState(): UseDesktopStateResult {
     loadState();
     const timer = window.setInterval(loadState, METADATA_REFRESH_POLICY.fallbackIntervalMs);
 
+    const unlistenPromise = listen<SessionOutputEvent>(
+      SESSION_OUTPUT_EVENT,
+      (event) => {
+        if (cancelled) return;
+        const { workspaceId, paneId, sessionId, chunk } = event.payload;
+        setState((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            workspaces: prev.workspaces.map((ws) => {
+              if (ws.id !== workspaceId) return ws;
+              return {
+                ...ws,
+                panes: ws.panes.map((pane) => {
+                  if (pane.paneId !== paneId || pane.sessionId !== sessionId) return pane;
+                  return { ...pane, output: pane.output + chunk };
+                }),
+              };
+            }),
+          };
+        });
+      },
+    );
+
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      unlistenPromise.then((unlisten) => unlisten());
     };
   }, []);
 

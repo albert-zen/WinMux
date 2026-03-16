@@ -8,8 +8,10 @@ use core_session::{
 use core_state::{DesktopBootstrap, WorkspaceRegistry, APP_NAME, STARTER_WORKSPACE_NAME};
 use serde::Serialize;
 use serde_json::{Value, json};
+use tauri::Emitter;
 
 pub const PIPE_NAME: &str = r"\\.\pipe\cmux-win-v1";
+pub const SESSION_OUTPUT_EVENT_NAME: &str = "session.output";
 
 type AppRuntime = RuntimeState<PtySessionFactory>;
 
@@ -47,6 +49,15 @@ struct WorkspaceState {
 struct DesktopState {
     protocol_version: u32,
     workspaces: Vec<WorkspaceState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionOutputPayload {
+    workspace_id: String,
+    pane_id: String,
+    session_id: String,
+    chunk: String,
 }
 
 impl<F> RuntimeState<F>
@@ -164,6 +175,20 @@ where
             protocol_version: 1,
             workspaces,
         }
+    }
+
+    #[cfg(test)]
+    fn drain_output_events(&mut self) -> Result<Vec<SessionOutputPayload>, SessionRuntimeError> {
+        let events = self.sessions.drain_output_events()?;
+        Ok(events
+            .into_iter()
+            .map(|event| SessionOutputPayload {
+                workspace_id: event.workspace_id,
+                pane_id: event.pane_id,
+                session_id: event.session_id,
+                chunk: event.chunk,
+            })
+            .collect())
     }
 }
 
@@ -603,6 +628,60 @@ where
     }
 }
 
+fn drain_and_emit_output_events<F, Emit>(
+    runtime: &Arc<Mutex<RuntimeState<F>>>,
+    mut emit: Emit,
+) -> Result<(), String>
+where
+    F: SessionHostFactory,
+    Emit: FnMut(&str, &SessionOutputPayload) -> Result<(), String>,
+{
+    let events = {
+        let mut runtime = runtime
+            .lock()
+            .map_err(|_| "runtime lock poisoned".to_string())?;
+        runtime
+            .sessions
+            .drain_output_events()
+            .map_err(|error| error.to_string())?
+    };
+
+    for (index, event) in events.iter().enumerate() {
+        let payload = SessionOutputPayload {
+            workspace_id: event.workspace_id.clone(),
+            pane_id: event.pane_id.clone(),
+            session_id: event.session_id.clone(),
+            chunk: event.chunk.clone(),
+        };
+
+        if let Err(error) = emit(SESSION_OUTPUT_EVENT_NAME, &payload) {
+            let mut runtime = runtime
+                .lock()
+                .map_err(|_| "runtime lock poisoned".to_string())?;
+            runtime.sessions.rollback_output_events(&events[index..]);
+            return Err(error);
+        }
+    }
+
+    Ok(())
+}
+
+fn start_output_event_pump<R: tauri::Runtime>(
+    app_handle: tauri::AppHandle<R>,
+    runtime: Arc<Mutex<AppRuntime>>,
+) {
+    std::thread::spawn(move || loop {
+        if let Err(error) = drain_and_emit_output_events(&runtime, |event_name, payload| {
+            app_handle
+                .emit(event_name, payload.clone())
+                .map_err(|error| error.to_string())
+        }) {
+            eprintln!("[cmux-events] output pump error: {error}");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    });
+}
+
 #[cfg(target_os = "windows")]
 fn start_named_pipe_server(runtime: Arc<Mutex<AppRuntime>>) {
     std::thread::spawn(move || {
@@ -686,11 +765,16 @@ pub fn run() {
         core_state::starter_workspace_registry(),
         PtySessionFactory,
     )));
+    let event_runtime = Arc::clone(&runtime);
 
     #[cfg(target_os = "windows")]
     start_named_pipe_server(Arc::clone(&runtime));
 
     tauri::Builder::default()
+        .setup(move |app| {
+            start_output_event_pump(app.handle().clone(), Arc::clone(&event_runtime));
+            Ok(())
+        })
         .manage(AppState { runtime })
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
@@ -715,7 +799,7 @@ mod tests {
     struct FakeFactoryState {
         spawn_commands: Vec<String>,
         writes: Vec<Vec<u8>>,
-        output: Vec<u8>,
+        outputs: Vec<Arc<Mutex<Vec<u8>>>>,
         exited: bool,
     }
 
@@ -726,13 +810,14 @@ mod tests {
 
     struct FakeHost {
         state: Arc<Mutex<FakeFactoryState>>,
+        output: Arc<Mutex<Vec<u8>>>,
     }
 
     impl SessionHost for FakeHost {
         fn write_input(&mut self, data: &[u8]) -> Result<(), String> {
             let mut state = self.state.lock().unwrap();
             state.writes.push(data.to_vec());
-            state.output.extend_from_slice(data);
+            self.output.lock().unwrap().extend_from_slice(data);
             if data.windows(4).any(|window| window == b"exit") {
                 state.exited = true;
             }
@@ -749,7 +834,7 @@ mod tests {
         }
 
         fn collected_output(&self) -> Vec<u8> {
-            self.state.lock().unwrap().output.clone()
+            self.output.lock().unwrap().clone()
         }
     }
 
@@ -759,13 +844,13 @@ mod tests {
             spec: &SessionSpec,
             _size: TerminalSize,
         ) -> Result<Box<dyn SessionHost>, String> {
-            self.state
-                .lock()
-                .unwrap()
-                .spawn_commands
-                .push(spec.command.clone());
+            let output = Arc::new(Mutex::new(Vec::new()));
+            let mut state = self.state.lock().unwrap();
+            state.outputs.push(Arc::clone(&output));
+            state.spawn_commands.push(spec.command.clone());
             Ok(Box::new(FakeHost {
                 state: Arc::clone(&self.state),
+                output,
             }))
         }
     }
@@ -1178,6 +1263,172 @@ mod tests {
             snapshot.workspaces[0].panes[0].session_id,
             Some("session:1".to_string())
         );
+    }
+
+    #[test]
+    fn runtime_drain_output_events_returns_session_output_payloads() {
+        let mut runtime = test_runtime();
+        let session_id = runtime
+            .sessions
+            .session_id_for_pane("ws-inbox", "pane-1")
+            .unwrap()
+            .to_string();
+
+        let send = handle_runtime_request(
+            &format!(
+                r#"{{
+                    "protocolVersion": 1,
+                    "id": "req-send",
+                    "type": "command",
+                    "command": "session.sendInput",
+                    "payload": {{
+                        "sessionId": "{session_id}",
+                        "data": "echo stream\r\n"
+                    }}
+                }}"#
+            ),
+            &mut runtime,
+        );
+        let send_response: ResponseEnvelope = serde_json::from_str(&send).unwrap();
+        assert!(send_response.is_ok());
+
+        let events = runtime.drain_output_events().unwrap();
+        assert_eq!(
+            events,
+            vec![SessionOutputPayload {
+                workspace_id: "ws-inbox".to_string(),
+                pane_id: "pane-1".to_string(),
+                session_id: "session:1".to_string(),
+                chunk: "echo stream\r\n".to_string(),
+            }]
+        );
+        assert!(runtime.drain_output_events().unwrap().is_empty());
+    }
+
+    #[test]
+    fn drain_and_emit_output_events_uses_session_output_event_name() {
+        let runtime = Arc::new(Mutex::new(test_runtime()));
+        let session_id = runtime
+            .lock()
+            .unwrap()
+            .sessions
+            .session_id_for_pane("ws-inbox", "pane-1")
+            .unwrap()
+            .to_string();
+
+        {
+            let mut runtime = runtime.lock().unwrap();
+            let send = handle_runtime_request(
+                &format!(
+                    r#"{{
+                        "protocolVersion": 1,
+                        "id": "req-send",
+                        "type": "command",
+                        "command": "session.sendInput",
+                        "payload": {{
+                            "sessionId": "{session_id}",
+                            "data": "echo emit\r\n"
+                        }}
+                    }}"#
+                ),
+                &mut runtime,
+            );
+            let send_response: ResponseEnvelope = serde_json::from_str(&send).unwrap();
+            assert!(send_response.is_ok());
+        }
+
+        let mut emitted = Vec::<(String, SessionOutputPayload)>::new();
+        drain_and_emit_output_events(&runtime, |event_name, payload| {
+            emitted.push((event_name.to_string(), payload.clone()));
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(emitted.len(), 1);
+        assert_eq!(emitted[0].0, SESSION_OUTPUT_EVENT_NAME);
+        assert_eq!(emitted[0].1.chunk, "echo emit\r\n");
+    }
+
+    #[test]
+    fn drain_and_emit_output_events_rolls_back_undelivered_events_after_emit_failure() {
+        let runtime = Arc::new(Mutex::new(test_runtime()));
+
+        {
+            let mut runtime = runtime.lock().unwrap();
+            let split = handle_runtime_request(
+                r#"{
+                    "protocolVersion": 1,
+                    "id": "req-split",
+                    "type": "command",
+                    "command": "pane.split",
+                    "payload": {
+                        "workspaceId": "ws-inbox",
+                        "paneId": "pane-1",
+                        "newPaneId": "pane-2",
+                        "orientation": "vertical",
+                        "ratio": 0.5
+                    }
+                }"#,
+                &mut runtime,
+            );
+            let split_response: ResponseEnvelope = serde_json::from_str(&split).unwrap();
+            assert!(split_response.is_ok());
+
+            let first_session = runtime
+                .sessions
+                .session_id_for_pane("ws-inbox", "pane-1")
+                .unwrap()
+                .to_string();
+            let second_session = runtime
+                .sessions
+                .session_id_for_pane("ws-inbox", "pane-2")
+                .unwrap()
+                .to_string();
+
+            for (session_id, data) in
+                [(first_session, "first\\r\\n"), (second_session, "second\\r\\n")]
+            {
+                let send = handle_runtime_request(
+                    &format!(
+                        r#"{{
+                            "protocolVersion": 1,
+                            "id": "req-send",
+                            "type": "command",
+                            "command": "session.sendInput",
+                            "payload": {{
+                                "sessionId": "{session_id}",
+                                "data": "{data}"
+                            }}
+                        }}"#
+                    ),
+                    &mut runtime,
+                );
+                let send_response: ResponseEnvelope = serde_json::from_str(&send).unwrap();
+                assert!(send_response.is_ok());
+            }
+        }
+
+        let mut first_pass = 0;
+        let err = drain_and_emit_output_events(&runtime, |_event_name, payload| {
+            first_pass += 1;
+            if first_pass == 2 {
+                return Err("emit failed".to_string());
+            }
+
+            assert_eq!(payload.chunk, "first\r\n");
+            Ok(())
+        })
+        .unwrap_err();
+        assert_eq!(err, "emit failed");
+
+        let mut replay = Vec::<String>::new();
+        drain_and_emit_output_events(&runtime, |_event_name, payload| {
+            replay.push(payload.chunk.clone());
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(replay, vec!["second\r\n".to_string()]);
     }
 
     #[test]
