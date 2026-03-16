@@ -8,7 +8,7 @@
     "dev:web": "pnpm --dir apps/desktop dev",
     "build:web": "pnpm --dir apps/desktop build",
     "typecheck": "pnpm --filter @cmux-win/protocol typecheck && pnpm --filter @cmux-win/ui typecheck && pnpm --filter @cmux-win/desktop typecheck",
-    "test:ts": "pnpm --filter @cmux-win/protocol test",
+    "test:ts": "pnpm --filter @cmux-win/protocol test && pnpm --filter @cmux-win/cli test",
     "test:rust": "node scripts/run-cargo.mjs test --workspace",
     "test": "pnpm test:ts && pnpm test:rust"
   },
