@@ -2,7 +2,7 @@ export const APP_NAME = "cmux-win";
 export const PROTOCOL_VERSION = 1 as const;
 export const STARTER_WORKSPACE_NAME = "inbox";
 export const STARTER_PANE_ID = "pane-1";
-export const SESSION_OUTPUT_EVENT = "session.output";
+export const SESSION_OUTPUT_EVENT = "session-output";
 
 export const METADATA_REFRESH_POLICY = {
   strategy: "hybrid",

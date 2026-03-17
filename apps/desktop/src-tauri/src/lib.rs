@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 use tauri::Emitter;
 
 pub const PIPE_NAME: &str = r"\\.\pipe\cmux-win-v1";
-pub const SESSION_OUTPUT_EVENT_NAME: &str = "session.output";
+pub const SESSION_OUTPUT_EVENT_NAME: &str = "session-output";
 
 type AppRuntime = RuntimeState<PtySessionFactory>;
 

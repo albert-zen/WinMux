@@ -5,6 +5,7 @@ import {
   METADATA_REFRESH_POLICY,
   type PaneState,
   PROTOCOL_VERSION,
+  SESSION_OUTPUT_EVENT,
   STARTER_PANE_ID,
   STARTER_WORKSPACE_NAME,
   applyScrollbackCap,
@@ -19,6 +20,10 @@ describe("protocol constants", () => {
 
   it("starts on protocol version one", () => {
     expect(PROTOCOL_VERSION).toBe(1);
+  });
+
+  it("uses a tauri-safe session output event name", () => {
+    expect(SESSION_OUTPUT_EVENT).toMatch(/^[A-Za-z0-9_:/-]+$/);
   });
 
   it("describes the default workspace snapshot contract", () => {
