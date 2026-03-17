@@ -7,6 +7,7 @@ import {
   paneFocus,
   paneSplit,
   sessionRestart,
+  setActiveWorkspace,
   workspaceClose,
   workspaceCreate,
   workspaceRename,
@@ -22,6 +23,7 @@ vi.mock("./lib/desktopClient", () => ({
   paneFocus: vi.fn(),
   paneSplit: vi.fn(),
   sessionRestart: vi.fn(),
+  setActiveWorkspace: vi.fn(),
   workspaceClose: vi.fn(),
   workspaceCreate: vi.fn(),
   workspaceRename: vi.fn(),
@@ -36,9 +38,11 @@ describe("App terminal pane", () => {
     vi.mocked(paneSplit).mockResolvedValue(undefined);
     vi.mocked(sessionRestart).mockResolvedValue(undefined);
     vi.mocked(paneClose).mockResolvedValue(undefined);
+    vi.mocked(setActiveWorkspace).mockResolvedValue(undefined);
     vi.mocked(useDesktopState).mockReturnValue({
       state: {
         protocolVersion: 1,
+        activeWorkspaceId: null,
         workspaces: [
           {
             id: "ws-inbox",
@@ -85,6 +89,7 @@ describe("App terminal pane", () => {
     vi.mocked(useDesktopState).mockReturnValue({
       state: {
         protocolVersion: 1,
+        activeWorkspaceId: null,
         workspaces: [
           {
             id: "ws-inbox",
@@ -124,6 +129,7 @@ describe("App terminal pane", () => {
     vi.mocked(useDesktopState).mockReturnValue({
       state: {
         protocolVersion: 1,
+        activeWorkspaceId: null,
         workspaces: [
           {
             id: "ws-inbox",
@@ -162,6 +168,7 @@ describe("App terminal pane", () => {
     vi.mocked(useDesktopState).mockReturnValue({
       state: {
         protocolVersion: 1,
+        activeWorkspaceId: null,
         workspaces: [
           {
             id: "ws-inbox",
@@ -200,6 +207,7 @@ describe("App terminal pane", () => {
     vi.mocked(useDesktopState).mockReturnValue({
       state: {
         protocolVersion: 1,
+        activeWorkspaceId: null,
         workspaces: [
           {
             id: "ws-inbox",
@@ -238,6 +246,7 @@ describe("App terminal pane", () => {
     vi.mocked(useDesktopState).mockReturnValue({
       state: {
         protocolVersion: 1,
+        activeWorkspaceId: null,
         workspaces: [
           {
             id: "ws-inbox",
@@ -273,6 +282,7 @@ describe("App terminal pane", () => {
     vi.mocked(useDesktopState).mockReturnValue({
       state: {
         protocolVersion: 1,
+        activeWorkspaceId: null,
         workspaces: [
           {
             id: "ws-inbox",
@@ -322,6 +332,7 @@ describe("App terminal pane", () => {
     vi.mocked(useDesktopState).mockReturnValue({
       state: {
         protocolVersion: 1,
+        activeWorkspaceId: null,
         workspaces: [
           {
             id: "ws-inbox",
@@ -411,6 +422,7 @@ describe("App terminal pane", () => {
     vi.mocked(useDesktopState).mockReturnValue({
       state: {
         protocolVersion: 1,
+        activeWorkspaceId: null,
         workspaces: [
           {
             id: "ws-inbox",
@@ -477,6 +489,7 @@ describe("App terminal pane", () => {
     vi.mocked(useDesktopState).mockReturnValue({
       state: {
         protocolVersion: 1,
+        activeWorkspaceId: null,
         workspaces: [
           {
             id: "ws-inbox",
@@ -511,6 +524,7 @@ describe("App terminal pane", () => {
     vi.mocked(useDesktopState).mockReturnValue({
       state: {
         protocolVersion: 1,
+        activeWorkspaceId: null,
         workspaces: [
           {
             id: "ws-inbox",
@@ -558,6 +572,7 @@ describe("App terminal pane", () => {
     vi.mocked(useDesktopState).mockReturnValue({
       state: {
         protocolVersion: 1,
+        activeWorkspaceId: null,
         workspaces: [
           {
             id: "ws-inbox",
@@ -625,6 +640,7 @@ describe("App terminal pane", () => {
     vi.mocked(useDesktopState).mockReturnValue({
       state: {
         protocolVersion: 1,
+        activeWorkspaceId: null,
         workspaces: [
           {
             id: "ws-inbox",
@@ -701,6 +717,7 @@ describe("App terminal pane", () => {
     vi.mocked(useDesktopState).mockReturnValue({
       state: {
         protocolVersion: 1,
+        activeWorkspaceId: null,
         workspaces: [
           {
             id: "ws-inbox",
@@ -736,6 +753,7 @@ describe("App terminal pane", () => {
     vi.mocked(useDesktopState).mockReturnValue({
       state: {
         protocolVersion: 1,
+        activeWorkspaceId: null,
         workspaces: [
           {
             id: "ws-inbox",
@@ -771,5 +789,71 @@ describe("App terminal pane", () => {
     await waitFor(() => {
       expect(screen.getByText("close pane failed")).toBeTruthy();
     });
+  });
+
+  it("initializes to server-provided active workspace", () => {
+    vi.mocked(useDesktopState).mockReturnValue({
+      state: {
+        protocolVersion: 1,
+        activeWorkspaceId: "ws-api",
+        workspaces: [
+          {
+            id: "ws-inbox",
+            name: "inbox",
+            rootDir: "D:\\dev\\inbox",
+            shellProfile: "cmd.exe",
+            focusedPaneId: "pane-1",
+            panes: [{ paneId: "pane-1", sessionId: "session:1", status: "running", output: "" }],
+          },
+          {
+            id: "ws-api",
+            name: "api",
+            rootDir: "D:\\dev\\api",
+            shellProfile: "pwsh",
+            focusedPaneId: "pane-9",
+            panes: [{ paneId: "pane-9", sessionId: "session:9", status: "running", output: "" }],
+          },
+        ],
+      },
+      error: null,
+    });
+
+    render(<App />);
+
+    expect(screen.getByText("D:\\dev\\api")).toBeTruthy();
+  });
+
+  it("switching workspace calls setActiveWorkspace", () => {
+    vi.mocked(useDesktopState).mockReturnValue({
+      state: {
+        protocolVersion: 1,
+        activeWorkspaceId: null,
+        workspaces: [
+          {
+            id: "ws-inbox",
+            name: "inbox",
+            rootDir: "D:\\dev\\inbox",
+            shellProfile: "cmd.exe",
+            focusedPaneId: "pane-1",
+            panes: [{ paneId: "pane-1", sessionId: "session:1", status: "running", output: "" }],
+          },
+          {
+            id: "ws-api",
+            name: "api",
+            rootDir: "D:\\dev\\api",
+            shellProfile: "pwsh",
+            focusedPaneId: "pane-9",
+            panes: [{ paneId: "pane-9", sessionId: "session:9", status: "running", output: "" }],
+          },
+        ],
+      },
+      error: null,
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open api" }));
+
+    expect(setActiveWorkspace).toHaveBeenCalledWith("ws-api");
   });
 });

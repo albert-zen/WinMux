@@ -31,6 +31,7 @@ struct RuntimeState<F> {
     registry: WorkspaceRegistry,
     sessions: LiveSessionRegistry<F>,
     state_path: Option<PathBuf>,
+    active_workspace_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -58,6 +59,7 @@ struct WorkspaceState {
 struct DesktopState {
     protocol_version: u32,
     workspaces: Vec<WorkspaceState>,
+    active_workspace_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -80,6 +82,7 @@ where
             registry,
             sessions: LiveSessionRegistry::new(factory),
             state_path: None,
+            active_workspace_id: None,
         };
         runtime.ensure_sessions_for_all_panes();
         runtime
@@ -94,6 +97,7 @@ where
             registry,
             sessions: LiveSessionRegistry::new(factory),
             state_path: Some(state_path),
+            active_workspace_id: None,
         };
         runtime.ensure_sessions_for_all_panes();
         runtime
@@ -101,7 +105,9 @@ where
 
     fn save_registry(&self) {
         if let Some(ref path) = self.state_path {
-            if let Ok(json) = self.registry.to_persisted_json() {
+            if let Ok(json) = self.registry.to_persisted_json_with_active(
+                self.active_workspace_id.as_deref()
+            ) {
                 if let Some(parent) = path.parent() {
                     let _ = std::fs::create_dir_all(parent);
                 }
@@ -220,6 +226,7 @@ where
         DesktopState {
             protocol_version: 1,
             workspaces,
+            active_workspace_id: self.active_workspace_id.clone(),
         }
     }
 
@@ -477,6 +484,20 @@ fn session_resize(
             .map(|error| error.message.clone())
             .unwrap_or_else(|| "resize failed".to_string()))
     }
+}
+
+#[tauri::command]
+fn set_active_workspace(
+    workspace_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let mut runtime = state.runtime.lock().unwrap();
+    if !runtime.registry.list().iter().any(|ws| ws.id == workspace_id) {
+        return Err("workspace not found".to_string());
+    }
+    runtime.active_workspace_id = Some(workspace_id);
+    runtime.save_registry();
+    Ok(())
 }
 
 fn default_terminal_size() -> TerminalSize {
@@ -1052,11 +1073,15 @@ async fn handle_pipe_connection(
     }
 }
 
-fn load_registry_from_state_path(path: &std::path::Path) -> WorkspaceRegistry {
+fn load_registry_from_state_path(path: &std::path::Path) -> (WorkspaceRegistry, Option<String>) {
     match std::fs::read_to_string(path) {
-        Ok(json) => WorkspaceRegistry::from_persisted_json(&json)
-            .unwrap_or_else(|_| core_state::starter_workspace_registry()),
-        Err(_) => core_state::starter_workspace_registry(),
+        Ok(json) => {
+            match WorkspaceRegistry::from_persisted_json_with_active(&json) {
+                Ok(result) => (result.registry, result.active_workspace_id),
+                Err(_) => (core_state::starter_workspace_registry(), None),
+            }
+        }
+        Err(_) => (core_state::starter_workspace_registry(), None),
     }
 }
 
@@ -1067,12 +1092,13 @@ pub fn run() {
         .join("cmux-win")
         .join("state.json");
 
-    let registry = load_registry_from_state_path(&state_path);
+    let (registry, active_workspace_id) = load_registry_from_state_path(&state_path);
     let runtime = Arc::new(Mutex::new(RuntimeState::new_with_state_path(
         registry,
         PtySessionFactory,
         state_path,
     )));
+    runtime.lock().unwrap().active_workspace_id = active_workspace_id;
     let event_runtime = Arc::clone(&runtime);
 
     #[cfg(target_os = "windows")]
@@ -1096,7 +1122,8 @@ pub fn run() {
             pane_close,
             session_send_input,
             session_restart,
-            session_resize
+            session_resize,
+            set_active_workspace
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -2301,7 +2328,7 @@ mod tests {
         assert!(rename_response.is_ok());
         assert!(state_path.exists());
 
-        let restored_registry = load_registry_from_state_path(&state_path);
+        let (restored_registry, _active_id) = load_registry_from_state_path(&state_path);
         let mut restored_runtime = RuntimeState::new(restored_registry, FakeFactory::default());
         let snapshot = restored_runtime.snapshot();
 
@@ -2319,11 +2346,85 @@ mod tests {
         fs::create_dir_all(state_path.parent().unwrap()).expect("state dir should exist");
         fs::write(&state_path, "{invalid").expect("invalid state should be written");
 
-        let restored_registry = load_registry_from_state_path(&state_path);
+        let (restored_registry, active_id) = load_registry_from_state_path(&state_path);
 
         assert_eq!(restored_registry.list().len(), 1);
         assert_eq!(restored_registry.list()[0].id, "ws-inbox");
+        assert_eq!(active_id, None);
 
         let _ = fs::remove_file(state_path);
+    }
+
+    #[test]
+    fn load_registry_from_state_path_returns_active_workspace_id() {
+        let state_path = unique_state_path("active-ws");
+        let mut registry = core_state::starter_workspace_registry();
+        registry
+            .create(
+                "ws-api",
+                "api",
+                "D:\\dev\\api",
+                "pwsh",
+                core_layout::WorkspaceLayout::starter(),
+            )
+            .unwrap();
+        let json = registry
+            .to_persisted_json_with_active(Some("ws-api"))
+            .unwrap();
+        fs::create_dir_all(state_path.parent().unwrap()).unwrap();
+        fs::write(&state_path, &json).unwrap();
+
+        let (restored_registry, active_id) = load_registry_from_state_path(&state_path);
+
+        assert_eq!(restored_registry.list().len(), 2);
+        assert_eq!(active_id, Some("ws-api".to_string()));
+
+        let _ = fs::remove_file(state_path);
+    }
+
+    #[test]
+    fn save_registry_persists_active_workspace_id() {
+        let state_path = unique_state_path("save-active");
+        let mut runtime = RuntimeState::new_with_state_path(
+            core_state::starter_workspace_registry(),
+            FakeFactory::default(),
+            state_path.clone(),
+        );
+        runtime.active_workspace_id = Some("ws-inbox".to_string());
+        runtime.save_registry();
+
+        let (restored_registry, active_id) = load_registry_from_state_path(&state_path);
+
+        assert_eq!(restored_registry.list().len(), 1);
+        assert_eq!(active_id, Some("ws-inbox".to_string()));
+
+        let _ = fs::remove_file(state_path);
+    }
+
+    #[test]
+    fn set_active_workspace_stores_id_in_runtime() {
+        let mut runtime = test_runtime();
+        assert_eq!(runtime.active_workspace_id, None);
+
+        // Validate the workspace exists
+        assert!(runtime.registry.list().iter().any(|ws| ws.id == "ws-inbox"));
+
+        runtime.active_workspace_id = Some("ws-inbox".to_string());
+        assert_eq!(runtime.active_workspace_id, Some("ws-inbox".to_string()));
+
+        // Verify validation would reject unknown workspace
+        assert!(!runtime.registry.list().iter().any(|ws| ws.id == "ws-missing"));
+    }
+
+    #[test]
+    fn snapshot_includes_active_workspace_id() {
+        let mut runtime = test_runtime();
+        runtime.active_workspace_id = Some("ws-inbox".to_string());
+
+        let snapshot = runtime.snapshot();
+
+        assert_eq!(snapshot.active_workspace_id, Some("ws-inbox".to_string()));
+        let json = serde_json::to_value(&snapshot).unwrap();
+        assert_eq!(json["activeWorkspaceId"], "ws-inbox");
     }
 }

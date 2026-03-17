@@ -64,6 +64,7 @@ export type WorkspaceState = {
 export type DesktopState = {
   protocolVersion: number;
   workspaces: WorkspaceState[];
+  activeWorkspaceId: string | null;
 };
 
 export type SessionOutputEvent = {

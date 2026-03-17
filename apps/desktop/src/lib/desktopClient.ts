@@ -49,3 +49,7 @@ export function workspaceClose(workspaceId: string): Promise<void> {
 export function workspaceRename(workspaceId: string, name: string): Promise<void> {
   return invoke("workspace_rename", { workspaceId, name });
 }
+
+export function setActiveWorkspace(workspaceId: string): Promise<void> {
+  return invoke("set_active_workspace", { workspaceId });
+}

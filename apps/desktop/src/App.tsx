@@ -9,6 +9,7 @@ import {
   workspaceClose,
   workspaceCreate,
   workspaceRename,
+  setActiveWorkspace,
 } from "./lib/desktopClient";
 import { WorkspaceSplitView } from "./components/WorkspaceSplitView";
 import "./App.css";
@@ -55,7 +56,11 @@ function App() {
       return;
     }
 
-    const fallbackWorkspace = pendingWorkspace ?? nextWorkspaces[0];
+    const serverActiveId = state?.activeWorkspaceId;
+    const fallbackWorkspace =
+      pendingWorkspace ??
+      (serverActiveId && nextWorkspaces.find((ws) => ws.id === serverActiveId)) ??
+      nextWorkspaces[0];
     if (!fallbackWorkspace) {
       return;
     }
@@ -108,6 +113,7 @@ function App() {
 
   const handleWorkspaceSelect = (workspaceId: string) => {
     setActiveWorkspaceId(workspaceId);
+    void setActiveWorkspace(workspaceId);
   };
 
   const handleCreateWorkspace = async () => {
