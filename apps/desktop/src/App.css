@@ -83,6 +83,7 @@ input {
   padding: 18px;
   display: grid;
   gap: 16px;
+  min-height: 520px;
 }
 
 .workspace-panel-empty {
@@ -117,14 +118,18 @@ input {
   border: 1px solid #443a32;
 }
 
-.pane-grid {
+.workspace-split-view {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 14px;
+  min-height: 420px;
+  align-items: stretch;
+  height: 100%;
+  grid-template-columns: var(--split-columns);
 }
 
-.pane-card {
+.split-pane {
+  min-width: 0;
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 12px;
   padding: 14px;
   border-radius: 10px;
@@ -132,15 +137,42 @@ input {
   border: 1px solid #342d27;
 }
 
-.pane-card-focused {
-  border-color: #7b4b2a;
+.split-pane + .split-pane {
+  border-left: 0;
 }
 
-.pane-head {
+.split-pane-focused {
+  border-color: #7b4b2a;
+  background: #241f1b;
+}
+
+.split-pane-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.split-pane-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.split-pane-meta strong {
+  display: block;
+}
+
+.split-pane-meta span {
+  color: #b9b0a4;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 0.8rem;
+}
+
+.split-pane-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .pane-status {
@@ -165,8 +197,35 @@ input {
   color: #b9b0a4;
 }
 
+.split-pane-actions button {
+  background: #2b241f;
+  color: #ece8df;
+  border: 1px solid #453932;
+  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+}
+
+.split-pane-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.split-handle {
+  width: 4px;
+  cursor: col-resize;
+  background: #312a25;
+  border-radius: 999px;
+}
+
+.split-handle:hover {
+  background: #5a4738;
+}
+
 .pane-terminal-surface {
-  height: 248px;
+  height: 100%;
+  min-height: 220px;
   border-radius: 8px;
   background: #11100f;
   border: 1px solid #2e2823;
@@ -198,6 +257,20 @@ input {
   .workspace-toolbar {
     grid-template-columns: 1fr;
     display: grid;
+  }
+
+  .workspace-panel {
+    min-height: auto;
+  }
+
+  .workspace-split-view {
+    grid-auto-flow: row;
+    grid-template-columns: 1fr;
+    grid-auto-rows: minmax(220px, 1fr);
+  }
+
+  .split-handle {
+    display: none;
   }
 
   .header-meta {

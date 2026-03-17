@@ -144,7 +144,7 @@ describe("App terminal pane", () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByTestId("pane-card-pane-2"));
+    fireEvent.click(screen.getByTestId("split-pane-pane-2"));
 
     expect(paneFocus).toHaveBeenCalledWith("ws-inbox", "pane-2");
   });
