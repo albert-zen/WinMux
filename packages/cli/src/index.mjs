@@ -93,14 +93,23 @@ let request;
 
 if (cmd === "workspace") {
   const [sub, ...flagArgs] = rest;
-  if (sub !== "create") die(`unknown subcommand: workspace ${sub ?? "(none)"}`);
-  const f = parseFlags(flagArgs);
-  requireFlags(f, "name", "root-dir", "shell-profile");
-  request = buildRequest("workspace.create", {
-    name: f["name"],
-    rootDir: f["root-dir"],
-    shellProfile: f["shell-profile"],
-  });
+  if (sub === "create") {
+    const f = parseFlags(flagArgs);
+    requireFlags(f, "name", "root-dir", "shell-profile");
+    request = buildRequest("workspace.create", {
+      name: f["name"],
+      rootDir: f["root-dir"],
+      shellProfile: f["shell-profile"],
+    });
+  } else if (sub === "close") {
+    const f = parseFlags(flagArgs);
+    requireFlags(f, "workspace-id");
+    request = buildRequest("workspace.close", {
+      workspaceId: f["workspace-id"],
+    });
+  } else {
+    die(`unknown subcommand: workspace ${sub ?? "(none)"}`);
+  }
 
 } else if (cmd === "pane") {
   const [sub, ...flagArgs] = rest;

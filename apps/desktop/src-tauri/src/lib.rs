@@ -317,6 +317,29 @@ fn pane_close(
 }
 
 #[tauri::command]
+fn workspace_close(
+    workspace_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let request = RequestEnvelope::new(
+        "desktop-workspace-close",
+        "workspace.close",
+        json!({
+            "workspaceId": workspace_id,
+        }),
+    );
+    let response = dispatch_runtime_request(&request, &mut state.runtime.lock().unwrap());
+    if response.is_ok() {
+        Ok(())
+    } else {
+        Err(response
+            .error()
+            .map(|error| error.message.clone())
+            .unwrap_or_else(|| "workspace close failed".to_string()))
+    }
+}
+
+#[tauri::command]
 fn session_send_input(
     session_id: String,
     input: String,
@@ -453,6 +476,7 @@ where
 {
     match request.command() {
         "workspace.create" => handle_workspace_create(request, runtime),
+        "workspace.close" => handle_workspace_close(request, runtime),
         "pane.split" => handle_pane_split(request, runtime),
         "pane.focus" => handle_pane_focus(request, runtime),
         "pane.close" => handle_pane_close(request, runtime),
@@ -627,6 +651,39 @@ where
             runtime_error_response(request.id(), error)
         }
     }
+}
+
+fn handle_workspace_close<F>(
+    request: &RequestEnvelope,
+    runtime: &mut RuntimeState<F>,
+) -> ResponseEnvelope
+where
+    F: SessionHostFactory,
+{
+    let workspace_id = request.payload()["workspaceId"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+
+    // Collect pane IDs before removing the workspace so we can clean up sessions.
+    let pane_ids = find_workspace(&runtime.registry, &workspace_id)
+        .map(|workspace| {
+            workspace
+                .layout
+                .panes
+                .iter()
+                .map(|pane| pane.pane_id.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let response = core_ipc::dispatch(request, &mut runtime.registry);
+    if response.is_ok() {
+        for pane_id in &pane_ids {
+            runtime.sessions.remove_pane(&workspace_id, pane_id);
+        }
+    }
+    response
 }
 
 fn handle_pane_split<F>(
@@ -1021,6 +1078,7 @@ pub fn run() {
             desktop_bootstrap,
             desktop_state,
             workspace_create,
+            workspace_close,
             pane_split,
             pane_focus,
             pane_close,
@@ -1966,5 +2024,172 @@ mod tests {
         let workspace = &registry.list()[0];
         assert_eq!(workspace.layout.panes.len(), 1);
         assert_eq!(workspace.layout.panes[0].pane_id, "pane-1");
+    }
+
+    #[test]
+    fn handle_runtime_request_workspace_close_removes_workspace_and_cleans_up_sessions() {
+        let mut runtime = test_runtime();
+        assert_eq!(runtime.sessions.session_id_for_pane("ws-inbox", "pane-1"), Some("session:1"));
+
+        let raw = handle_runtime_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req-ws-close",
+                "type": "command",
+                "command": "workspace.close",
+                "payload": {
+                    "workspaceId": "ws-inbox"
+                }
+            }"#,
+            &mut runtime,
+        );
+
+        let response: ResponseEnvelope = serde_json::from_str(&raw).unwrap();
+        assert!(response.is_ok());
+        assert_eq!(response.result().unwrap()["workspaceId"], "ws-inbox");
+        assert!(runtime.registry.list().is_empty());
+        assert_eq!(runtime.sessions.session_id_for_pane("ws-inbox", "pane-1"), None);
+    }
+
+    #[test]
+    fn handle_runtime_request_workspace_close_cleans_up_all_pane_sessions() {
+        let mut runtime = test_runtime();
+
+        // Split to create a second pane with its own session
+        let split = handle_runtime_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req-split",
+                "type": "command",
+                "command": "pane.split",
+                "payload": {
+                    "workspaceId": "ws-inbox",
+                    "paneId": "pane-1",
+                    "newPaneId": "pane-2",
+                    "orientation": "vertical",
+                    "ratio": 0.5
+                }
+            }"#,
+            &mut runtime,
+        );
+        let split_response: ResponseEnvelope = serde_json::from_str(&split).unwrap();
+        assert!(split_response.is_ok());
+        assert_eq!(runtime.sessions.session_id_for_pane("ws-inbox", "pane-2"), Some("session:2"));
+
+        let raw = handle_runtime_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req-ws-close",
+                "type": "command",
+                "command": "workspace.close",
+                "payload": {
+                    "workspaceId": "ws-inbox"
+                }
+            }"#,
+            &mut runtime,
+        );
+
+        let response: ResponseEnvelope = serde_json::from_str(&raw).unwrap();
+        assert!(response.is_ok());
+        assert!(runtime.registry.list().is_empty());
+        assert_eq!(runtime.sessions.session_id_for_pane("ws-inbox", "pane-1"), None);
+        assert_eq!(runtime.sessions.session_id_for_pane("ws-inbox", "pane-2"), None);
+    }
+
+    #[test]
+    fn handle_runtime_request_workspace_close_returns_not_found_for_unknown_workspace() {
+        let mut runtime = test_runtime();
+
+        let raw = handle_runtime_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req-ws-close-missing",
+                "type": "command",
+                "command": "workspace.close",
+                "payload": {
+                    "workspaceId": "ws-missing"
+                }
+            }"#,
+            &mut runtime,
+        );
+
+        let response: ResponseEnvelope = serde_json::from_str(&raw).unwrap();
+        assert!(!response.is_ok());
+        assert_eq!(response.error().unwrap().code, ErrorCode::NotFound);
+        // Starter workspace should be untouched
+        assert_eq!(runtime.registry.list().len(), 1);
+        assert_eq!(runtime.registry.list()[0].id, "ws-inbox");
+    }
+
+    #[test]
+    fn handle_runtime_request_workspace_close_preserves_other_workspaces() {
+        let mut runtime = test_runtime();
+
+        // Create a second workspace
+        let create = handle_runtime_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req-create",
+                "type": "command",
+                "command": "workspace.create",
+                "payload": {
+                    "name": "api",
+                    "rootDir": "D:\\dev\\api",
+                    "shellProfile": "pwsh"
+                }
+            }"#,
+            &mut runtime,
+        );
+        let create_response: ResponseEnvelope = serde_json::from_str(&create).unwrap();
+        assert!(create_response.is_ok());
+        let api_workspace_id = create_response.result().unwrap()["workspaceId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(runtime.registry.list().len(), 2);
+
+        // Close only the inbox workspace
+        let raw = handle_runtime_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req-ws-close",
+                "type": "command",
+                "command": "workspace.close",
+                "payload": {
+                    "workspaceId": "ws-inbox"
+                }
+            }"#,
+            &mut runtime,
+        );
+
+        let response: ResponseEnvelope = serde_json::from_str(&raw).unwrap();
+        assert!(response.is_ok());
+        assert_eq!(runtime.registry.list().len(), 1);
+        assert_eq!(runtime.registry.list()[0].id, api_workspace_id);
+        // API workspace session should still be intact
+        assert!(runtime.sessions.session_id_for_pane(&api_workspace_id, "pane-1").is_some());
+    }
+
+    #[test]
+    fn handle_runtime_request_workspace_close_snapshot_excludes_closed_workspace() {
+        let mut runtime = test_runtime();
+
+        let raw = handle_runtime_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req-ws-close",
+                "type": "command",
+                "command": "workspace.close",
+                "payload": {
+                    "workspaceId": "ws-inbox"
+                }
+            }"#,
+            &mut runtime,
+        );
+        let response: ResponseEnvelope = serde_json::from_str(&raw).unwrap();
+        assert!(response.is_ok());
+
+        let snapshot = runtime.snapshot();
+        assert!(snapshot.workspaces.is_empty());
     }
 }

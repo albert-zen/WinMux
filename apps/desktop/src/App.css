@@ -110,6 +110,13 @@ input {
   gap: 8px;
 }
 
+.workspace-list-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  gap: 8px;
+  align-items: stretch;
+}
+
 .workspace-list-item {
   background: #201c19;
   border: 1px solid #342d27;
@@ -130,6 +137,21 @@ input {
 .workspace-list-item small {
   color: #b9b0a4;
   font-family: "Cascadia Code", "Consolas", monospace;
+}
+
+.workspace-list-close {
+  background: #2b241f;
+  color: #d7cfc3;
+  border: 1px solid #453932;
+  border-radius: 8px;
+  width: 32px;
+  height: 100%;
+  cursor: pointer;
+}
+
+.workspace-list-close:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .workspace-create label {

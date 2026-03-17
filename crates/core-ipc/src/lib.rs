@@ -321,6 +321,7 @@ pub fn validate_request(request: &RequestEnvelope) -> Result<(), ProtocolError> 
         "session.sendInput" => validate_session_send_input_payload(&request.payload),
         "session.resize" => validate_session_resize_payload(&request.payload),
         "session.restart" => validate_session_restart_payload(&request.payload),
+        "workspace.close" => validate_workspace_close_payload(&request.payload),
         "session.getStatus" => validate_session_get_status_payload(&request.payload),
         "app.getState" => validate_app_get_state_payload(&request.payload),
         "notify.send" => validate_notify_payload(&request.payload),
@@ -338,6 +339,12 @@ fn validate_workspace_create_payload(payload: &Value) -> Result<(), ProtocolErro
     required_string_field(object, "rootDir")?;
     required_string_field(object, "shellProfile")?;
 
+    Ok(())
+}
+
+fn validate_workspace_close_payload(payload: &Value) -> Result<(), ProtocolError> {
+    let object = payload_object(payload)?;
+    required_string_field(object, "workspaceId")?;
     Ok(())
 }
 
@@ -1187,6 +1194,60 @@ mod tests {
         assert_eq!(err.code, ErrorCode::Unsupported);
         assert_eq!(err.message, "Unsupported command: workspace.rename");
     }
+
+    #[test]
+    fn parse_and_validate_accepts_valid_workspace_close_requests() {
+        let request = parse_and_validate_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req_close",
+                "type": "command",
+                "command": "workspace.close",
+                "payload": {
+                    "workspaceId": "ws-inbox"
+                }
+            }"#,
+        )
+        .expect("valid workspace.close should pass");
+
+        assert_eq!(request.command(), "workspace.close");
+        assert_eq!(request.payload()["workspaceId"], "ws-inbox");
+    }
+
+    #[test]
+    fn parse_and_validate_rejects_workspace_close_without_workspace_id() {
+        let err = parse_and_validate_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req_close",
+                "type": "command",
+                "command": "workspace.close",
+                "payload": {}
+            }"#,
+        )
+        .expect_err("missing workspaceId should fail");
+
+        assert_eq!(err.code, ErrorCode::InvalidPayload);
+        assert_eq!(err.message, "Missing required field: workspaceId");
+    }
+
+    #[test]
+    fn parse_and_validate_rejects_workspace_close_with_blank_workspace_id() {
+        let err = parse_and_validate_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req_close",
+                "type": "command",
+                "command": "workspace.close",
+                "payload": {
+                    "workspaceId": "  "
+                }
+            }"#,
+        )
+        .expect_err("blank workspaceId should fail");
+
+        assert_eq!(err.code, ErrorCode::InvalidPayload);
+    }
 }
 
 // ── Command dispatch ─────────────────────────────────────────────────────────
@@ -1207,6 +1268,7 @@ pub fn dispatch(request: &RequestEnvelope, registry: &mut WorkspaceRegistry) -> 
 
     match request.command() {
         "workspace.create" => handle_workspace_create(request, registry),
+        "workspace.close" => handle_workspace_close(request, registry),
         "pane.split" => handle_pane_split(request, registry),
         "pane.close" => handle_pane_close(request, registry),
         "pane.focus" => handle_pane_focus(request, registry),
@@ -1250,6 +1312,32 @@ fn handle_workspace_create(
         Err(WorkspaceError::DuplicateWorkspaceId) => ResponseEnvelope::error(
             request.id(),
             ProtocolError::new(ErrorCode::Conflict, "Workspace ID conflict; try again"),
+        ),
+        Err(e) => ResponseEnvelope::error(
+            request.id(),
+            ProtocolError::new(ErrorCode::InternalError, format!("{e:?}")),
+        ),
+    }
+}
+
+fn handle_workspace_close(
+    request: &RequestEnvelope,
+    registry: &mut WorkspaceRegistry,
+) -> ResponseEnvelope {
+    let p = request.payload();
+    let workspace_id = p["workspaceId"].as_str().unwrap_or_default();
+
+    match registry.remove_workspace(workspace_id) {
+        Ok(()) => ResponseEnvelope::success(
+            request.id(),
+            serde_json::json!({ "workspaceId": workspace_id }),
+        ),
+        Err(WorkspaceError::WorkspaceNotFound) => ResponseEnvelope::error(
+            request.id(),
+            ProtocolError::new(
+                ErrorCode::NotFound,
+                format!("Workspace not found: {workspace_id}"),
+            ),
         ),
         Err(e) => ResponseEnvelope::error(
             request.id(),
@@ -1619,6 +1707,84 @@ mod handler_tests {
         assert!(resp.is_ok());
         assert_eq!(reg.list()[0].layout.panes.len(), 1);
         assert_eq!(reg.list()[0].layout.panes[0].pane_id, "pane-1");
+    }
+
+    // ── workspace.close ─────────────────────────────────────────────────
+
+    #[test]
+    fn workspace_close_removes_workspace_from_registry() {
+        let mut reg = inbox_registry();
+        let req = RequestEnvelope::new(
+            "rc1",
+            "workspace.close",
+            json!({ "workspaceId": "ws-inbox" }),
+        );
+        let resp = dispatch(&req, &mut reg);
+
+        assert!(resp.is_ok());
+        assert_eq!(resp.result().unwrap()["workspaceId"], "ws-inbox");
+        assert!(reg.list().is_empty());
+    }
+
+    #[test]
+    fn workspace_close_returns_not_found_for_unknown_workspace() {
+        let mut reg = inbox_registry();
+        let req = RequestEnvelope::new(
+            "rc2",
+            "workspace.close",
+            json!({ "workspaceId": "ws-missing" }),
+        );
+        let resp = dispatch(&req, &mut reg);
+
+        assert!(!resp.is_ok());
+        assert_eq!(resp.error().unwrap().code, ErrorCode::NotFound);
+        assert!(resp.error().unwrap().message.contains("ws-missing"));
+    }
+
+    #[test]
+    fn workspace_close_preserves_remaining_workspaces() {
+        let mut reg = inbox_registry();
+        // Create a second workspace
+        let create = RequestEnvelope::new(
+            "rc3a",
+            "workspace.create",
+            json!({ "name": "api", "rootDir": "/tmp/api", "shellProfile": "bash" }),
+        );
+        let create_resp = dispatch(&create, &mut reg);
+        assert!(create_resp.is_ok());
+        let api_id = create_resp.result().unwrap()["workspaceId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(reg.list().len(), 2);
+
+        // Close the inbox workspace
+        let close = RequestEnvelope::new(
+            "rc3b",
+            "workspace.close",
+            json!({ "workspaceId": "ws-inbox" }),
+        );
+        let resp = dispatch(&close, &mut reg);
+
+        assert!(resp.is_ok());
+        assert_eq!(reg.list().len(), 1);
+        assert_eq!(reg.list()[0].id, api_id);
+    }
+
+    #[test]
+    fn workspace_close_is_idempotent_returns_not_found_on_second_call() {
+        let mut reg = inbox_registry();
+        let req = RequestEnvelope::new(
+            "rc4",
+            "workspace.close",
+            json!({ "workspaceId": "ws-inbox" }),
+        );
+        let first = dispatch(&req, &mut reg);
+        assert!(first.is_ok());
+
+        let second = dispatch(&req, &mut reg);
+        assert!(!second.is_ok());
+        assert_eq!(second.error().unwrap().code, ErrorCode::NotFound);
     }
 
     // ── notify.send ───────────────────────────────────────────────────────

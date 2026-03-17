@@ -41,3 +41,7 @@ export function paneFocus(workspaceId: string, paneId: string): Promise<void> {
 export function paneClose(workspaceId: string, paneId: string): Promise<void> {
   return invoke("pane_close", { workspaceId, paneId });
 }
+
+export function workspaceClose(workspaceId: string): Promise<void> {
+  return invoke("workspace_close", { workspaceId });
+}

@@ -7,6 +7,7 @@ import {
   paneFocus,
   paneSplit,
   sessionRestart,
+  workspaceClose,
   workspaceCreate,
 } from "./lib/desktopClient";
 import { PaneTerminal } from "./components/PaneTerminal";
@@ -20,6 +21,7 @@ vi.mock("./lib/desktopClient", () => ({
   paneFocus: vi.fn(),
   paneSplit: vi.fn(),
   sessionRestart: vi.fn(),
+  workspaceClose: vi.fn(),
   workspaceCreate: vi.fn(),
 }));
 
@@ -463,6 +465,123 @@ describe("App terminal pane", () => {
       expect(
         (screen.getByLabelText("Workspace Name") as HTMLInputElement).value
       ).toBe("inbox");
+    });
+  });
+
+  it("calls workspaceClose when close workspace button is clicked", () => {
+    vi.mocked(useDesktopState).mockReturnValue({
+      state: {
+        protocolVersion: 1,
+        workspaces: [
+          {
+            id: "ws-inbox",
+            name: "inbox",
+            rootDir: "D:\\dev\\inbox",
+            shellProfile: "cmd.exe",
+            focusedPaneId: "pane-1",
+            panes: [{ paneId: "pane-1", sessionId: "session:1", status: "running", output: "" }],
+          },
+          {
+            id: "ws-api",
+            name: "api",
+            rootDir: "D:\\dev\\api",
+            shellProfile: "pwsh",
+            focusedPaneId: "pane-9",
+            panes: [{ paneId: "pane-9", sessionId: "session:9", status: "running", output: "" }],
+          },
+        ],
+      },
+      error: null,
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close api" }));
+
+    expect(workspaceClose).toHaveBeenCalledWith("ws-api");
+    expect(screen.getByText("D:\\dev\\inbox")).toBeTruthy();
+  });
+
+  it("switches to another workspace when the active one is closed", async () => {
+    vi.mocked(useDesktopState).mockReturnValue({
+      state: {
+        protocolVersion: 1,
+        workspaces: [
+          {
+            id: "ws-inbox",
+            name: "inbox",
+            rootDir: "D:\\dev\\inbox",
+            shellProfile: "cmd.exe",
+            focusedPaneId: "pane-1",
+            panes: [{ paneId: "pane-1", sessionId: "session:1", status: "running", output: "" }],
+          },
+          {
+            id: "ws-api",
+            name: "api",
+            rootDir: "D:\\dev\\api",
+            shellProfile: "pwsh",
+            focusedPaneId: "pane-9",
+            panes: [{ paneId: "pane-9", sessionId: "session:9", status: "running", output: "" }],
+          },
+        ],
+      },
+      error: null,
+    });
+
+    render(<App />);
+
+    // ws-inbox is active by default (first workspace), close it
+    fireEvent.click(screen.getByRole("button", { name: "Close inbox" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("D:\\dev\\api")).toBeTruthy();
+    });
+  });
+
+  it("disables close workspace when only one workspace remains", () => {
+    render(<App />); // beforeEach mock has single workspace ws-inbox
+
+    const closeButton = screen.getByRole("button", {
+      name: "Close inbox",
+    }) as HTMLButtonElement;
+    expect(closeButton.disabled).toBe(true);
+    fireEvent.click(closeButton);
+    expect(workspaceClose).not.toHaveBeenCalled();
+  });
+
+  it("shows an error when workspace close fails", async () => {
+    vi.mocked(useDesktopState).mockReturnValue({
+      state: {
+        protocolVersion: 1,
+        workspaces: [
+          {
+            id: "ws-inbox",
+            name: "inbox",
+            rootDir: "D:\\dev\\inbox",
+            shellProfile: "cmd.exe",
+            focusedPaneId: "pane-1",
+            panes: [{ paneId: "pane-1", sessionId: "session:1", status: "running", output: "" }],
+          },
+          {
+            id: "ws-api",
+            name: "api",
+            rootDir: "D:\\dev\\api",
+            shellProfile: "pwsh",
+            focusedPaneId: "pane-9",
+            panes: [{ paneId: "pane-9", sessionId: "session:9", status: "running", output: "" }],
+          },
+        ],
+      },
+      error: null,
+    });
+    vi.mocked(workspaceClose).mockRejectedValue(new Error("close failed"));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close api" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("close failed")).toBeTruthy();
     });
   });
 });

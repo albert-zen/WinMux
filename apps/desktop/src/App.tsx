@@ -6,6 +6,7 @@ import {
   sessionRestart,
   paneFocus,
   paneClose,
+  workspaceClose,
   workspaceCreate,
 } from "./lib/desktopClient";
 import { WorkspaceSplitView } from "./components/WorkspaceSplitView";
@@ -15,6 +16,7 @@ function App() {
   const { state, error } = useDesktopState();
   const [pendingWorkspace, setPendingWorkspace] = useState<WorkspaceState | null>(null);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
+  const [closeError, setCloseError] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createForm, setCreateForm] = useState({
     name: "",
@@ -141,6 +143,20 @@ function App() {
     void paneClose(workspace.id, paneId);
   };
 
+  const handleCloseWorkspace = async (workspaceId: string) => {
+    setCloseError(null);
+
+    try {
+      await workspaceClose(workspaceId);
+      if (workspaceId === activeWorkspaceId) {
+        const remaining = workspaces.filter((w) => w.id !== workspaceId);
+        setActiveWorkspaceId(remaining[0]?.id ?? null);
+      }
+    } catch (reason) {
+      setCloseError(reason instanceof Error ? reason.message : String(reason));
+    }
+  };
+
   const handleRestartPane = (paneId: string) => {
     const pane = workspace?.panes.find((entry) => entry.paneId === paneId) ?? null;
     if (!pane?.sessionId) {
@@ -172,19 +188,34 @@ function App() {
               {workspaces.map((entry) => {
                 const isActive = entry.id === workspace?.id;
                 return (
-                  <button
-                    type="button"
-                    key={entry.id}
-                    className={`workspace-list-item${isActive ? " workspace-list-item-active" : ""}`}
-                    aria-label={`Open ${entry.name}`}
-                    onClick={() => handleWorkspaceSelect(entry.id)}
-                  >
-                    <span>{entry.name}</span>
-                    <small>{entry.panes.length} panes</small>
-                  </button>
+                  <div className="workspace-list-row" key={entry.id}>
+                    <button
+                      type="button"
+                      className={`workspace-list-item${isActive ? " workspace-list-item-active" : ""}`}
+                      aria-label={`Open ${entry.name}`}
+                      onClick={() => handleWorkspaceSelect(entry.id)}
+                    >
+                      <span>{entry.name}</span>
+                      <small>{entry.panes.length} panes</small>
+                    </button>
+                    <button
+                      type="button"
+                      className="workspace-list-close"
+                      aria-label={`Close ${entry.name}`}
+                      disabled={workspaces.length <= 1}
+                      onClick={() => void handleCloseWorkspace(entry.id)}
+                    >
+                      ×
+                    </button>
+                  </div>
                 );
               })}
             </div>
+            {closeError ? (
+              <p className="create-error" role="alert">
+                {closeError}
+              </p>
+            ) : null}
           </div>
 
           <div className="workspace-rail-section workspace-create">

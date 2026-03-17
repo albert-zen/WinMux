@@ -109,6 +109,26 @@ test("workspace create sends request over pipe and prints response", async () =>
   assert.ok(typeof req.id === "string" && req.id.length > 0);
 });
 
+test("workspace close sends request over pipe and prints response", async () => {
+  const { result, received } = await runViaPipe(
+    ["workspace", "close", "--workspace-id", "ws-123"],
+    { ok: true },
+  );
+  assert.equal(result.status, 0, `exited ${result.status}: ${result.stderr}`);
+  const req = received[0];
+  assert.equal(req.command, "workspace.close");
+  assert.equal(req.payload.workspaceId, "ws-123");
+  assert.equal(req.type, "command");
+  assert.equal(req.protocolVersion, 1);
+  assert.ok(typeof req.id === "string" && req.id.length > 0);
+});
+
+test("workspace close requires --workspace-id", () => {
+  const r = run(["workspace", "close"]);
+  assert.notEqual(r.status, 0);
+  assert.ok(r.stderr.includes("--workspace-id"), `stderr: ${r.stderr}`);
+});
+
 test("pane split sends request over pipe and prints response", async () => {
   const { result, received } = await runViaPipe(
     ["pane", "split", "--workspace-id", "ws-1", "--pane-id", "p-1",
