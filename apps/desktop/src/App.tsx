@@ -9,12 +9,12 @@ import {
   paneClose,
   workspaceClose,
   workspaceCreate,
-  workspaceRename,
   setActiveWorkspace,
 } from "./lib/desktopClient";
 import { WorkspaceSplitView } from "./components/WorkspaceSplitView";
-import { NotificationCenter } from "./components/NotificationCenter";
-import { ThemeSelector } from "./components/ThemeSelector";
+import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
+import { CreateWorkspaceModal } from "./components/CreateWorkspaceModal";
+import { StatusBar } from "./components/StatusBar";
 import "./App.css";
 
 function App() {
@@ -23,19 +23,12 @@ function App() {
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
   const [closeError, setCloseError] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
-  const [renameError, setRenameError] = useState<string | null>(null);
   const [splitError, setSplitError] = useState<string | null>(null);
   const [restartError, setRestartError] = useState<string | null>(null);
   const [paneCloseError, setPaneCloseError] = useState<string | null>(null);
   const [bannerDismissed, setBannerDismissed] = useState(false);
-  const [renameOverrides, setRenameOverrides] = useState<Record<string, string>>({});
-  const [isRenaming, setIsRenaming] = useState(false);
-  const [renameName, setRenameName] = useState("");
-  const [createForm, setCreateForm] = useState({
-    name: "",
-    rootDir: "D:\\dev\\workspace",
-    shellProfile: "cmd.exe",
-  });
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [notificationCounts, setNotificationCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const nextWorkspaces = state?.workspaces ?? [];
@@ -69,78 +62,35 @@ function App() {
     }
 
     setActiveWorkspaceId(fallbackWorkspace.id);
-    setCreateForm((prev) => ({
-      ...prev,
-      rootDir: prev.rootDir === "D:\\dev\\workspace" ? fallbackWorkspace.rootDir : prev.rootDir,
-      shellProfile:
-        prev.shellProfile === "cmd.exe" ? fallbackWorkspace.shellProfile : prev.shellProfile,
-    }));
   }, [activeWorkspaceId, pendingWorkspace, state?.workspaces]);
 
-  useEffect(() => {
-    const actualNames = new Map((state?.workspaces ?? []).map((entry) => [entry.id, entry.name]));
-    setRenameOverrides((prev) => {
-      let changed = false;
-      const next: Record<string, string> = {};
-      for (const [workspaceId, overrideName] of Object.entries(prev)) {
-        const actualName = actualNames.get(workspaceId);
-        if (actualName && actualName !== overrideName) {
-          next[workspaceId] = overrideName;
-        } else {
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, [state?.workspaces]);
-
-  const baseWorkspaces = (state?.workspaces ?? []).map((entry) => {
-    const overrideName = renameOverrides[entry.id];
-    return overrideName && overrideName !== entry.name
-      ? { ...entry, name: overrideName }
-      : entry;
-  });
-
   const workspaces =
-    pendingWorkspace &&
-    !baseWorkspaces.some((entry) => entry.id === pendingWorkspace.id)
-      ? [...baseWorkspaces, pendingWorkspace]
-      : baseWorkspaces;
+    pendingWorkspace && !state?.workspaces.some((entry) => entry.id === pendingWorkspace.id)
+      ? [...(state?.workspaces ?? []), pendingWorkspace]
+      : (state?.workspaces ?? []);
   const workspace =
     workspaces.find((entry) => entry.id === activeWorkspaceId) ?? workspaces[0] ?? null;
-
-  useEffect(() => {
-    setRenameName(workspace?.name ?? "");
-    setRenameError(null);
-  }, [workspace?.id, workspace?.name]);
 
   const handleWorkspaceSelect = (workspaceId: string) => {
     setActiveWorkspaceId(workspaceId);
     void setActiveWorkspace(workspaceId);
   };
 
-  const handleCreateWorkspace = async () => {
-    const name = createForm.name.trim();
-    const rootDir = createForm.rootDir.trim();
-    const shellProfile = createForm.shellProfile.trim();
-    if (!name || !rootDir || !shellProfile) {
-      return;
-    }
-
+  const handleCreateWorkspace = async (config: { name: string; rootDir: string; shellProfile: string }) => {
     setCreateError(null);
 
     try {
       const result = await workspaceCreate({
-        name,
-        rootDir,
-        shellProfile,
+        name: config.name,
+        rootDir: config.rootDir,
+        shellProfile: config.shellProfile,
       });
 
       setPendingWorkspace({
         id: result.workspaceId,
-        name,
-        rootDir,
-        shellProfile,
+        name: config.name,
+        rootDir: config.rootDir,
+        shellProfile: config.shellProfile,
         focusedPaneId: result.paneId,
         layout: { type: "pane", paneId: result.paneId, sessionKind: "freshShell" },
         paneStates: {
@@ -153,10 +103,7 @@ function App() {
         },
       });
       setActiveWorkspaceId(result.workspaceId);
-      setCreateForm((prev) => ({
-        ...prev,
-        name: "",
-      }));
+      setIsCreateModalOpen(false);
     } catch (reason) {
       setCreateError(reason instanceof Error ? reason.message : String(reason));
     }
@@ -171,17 +118,6 @@ function App() {
     setSplitError(null);
     paneSplit(workspace.id, focusedPane.paneId, direction).catch((reason) => {
       setSplitError(reason instanceof Error ? reason.message : String(reason));
-    });
-  };
-
-  const handleRestart = (sessionId: string | null) => {
-    if (!sessionId) {
-      return;
-    }
-
-    setRestartError(null);
-    sessionRestart(sessionId).catch((reason) => {
-      setRestartError(reason instanceof Error ? reason.message : String(reason));
     });
   };
 
@@ -217,26 +153,10 @@ function App() {
     if (!pane?.sessionId) {
       return;
     }
-    handleRestart(pane.sessionId);
-  };
-
-  const handleRenameWorkspace = async () => {
-    const name = renameName.trim();
-    if (!name || !workspace) return;
-    setRenameError(null);
-    setIsRenaming(true);
-    try {
-      await workspaceRename(workspace.id, name);
-      setRenameOverrides((prev) => ({
-        ...prev,
-        [workspace.id]: name,
-      }));
-      setRenameName(name);
-    } catch (reason) {
-      setRenameError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setIsRenaming(false);
-    }
+    setRestartError(null);
+    sessionRestart(pane.sessionId).catch((reason) => {
+      setRestartError(reason instanceof Error ? reason.message : String(reason));
+    });
   };
 
   const showBanner = error && !bannerDismissed;
@@ -255,6 +175,18 @@ function App() {
     handleSplit("horizontal");
   }, [workspace]);
 
+  const handleNewWorkspace = useCallback(() => {
+    setIsCreateModalOpen(true);
+  }, []);
+
+  // Workspace switching by number
+  const handleWorkspaceJump = useCallback((index: number) => {
+    const target = workspaces[index];
+    if (target) {
+      handleWorkspaceSelect(target.id);
+    }
+  }, [workspaces]);
+
   useKeyboardShortcuts({
     workspace: workspace
       ? {
@@ -264,7 +196,20 @@ function App() {
       : null,
     onSplitVertical: handleSplitVertical,
     onSplitHorizontal: handleSplitHorizontal,
+    onNewWorkspace: handleNewWorkspace,
+    onWorkspaceJump: handleWorkspaceJump,
+    onToggleSidebar: () => {
+      // Future: toggle sidebar visibility
+    },
   });
+
+  // Calculate total notifications
+  const totalNotifications = Object.values(notificationCounts).reduce((a, b) => a + b, 0);
+
+  // Default values for create form
+  const lastWorkspace = workspaces[workspaces.length - 1];
+  const defaultRootDir = lastWorkspace?.rootDir ?? "D:\\dev\\workspace";
+  const defaultShellProfile = lastWorkspace?.shellProfile ?? "cmd.exe";
 
   return (
     <main className="app-shell">
@@ -282,172 +227,62 @@ function App() {
         </div>
       ) : null}
 
-      <header className="app-header">
-        <div>
-          <h1>{APP_NAME}</h1>
-          <p>
-            Starter workspace with a live terminal pane, split action, and restart path.
+      <WorkspaceSidebar
+        workspaces={workspaces}
+        activeWorkspaceId={activeWorkspaceId}
+        onSelectWorkspace={handleWorkspaceSelect}
+        onNewWorkspace={handleNewWorkspace}
+        notificationCounts={notificationCounts}
+      />
+
+      <section className="workspace-main">
+        {splitError ? (
+          <p className="operation-error" role="status">
+            {splitError}
           </p>
-        </div>
-        <div className="header-meta">
-          <NotificationCenter />
-          <span>{workspace?.name ?? "loading"}</span>
-          <span>{workspace?.shellProfile ?? "waiting"}</span>
-        </div>
-      </header>
-
-      <section className="workspace-shell">
-        <aside className="workspace-rail">
-          <div className="workspace-rail-section">
-            <strong>Workspaces</strong>
-            <div className="workspace-list">
-              {workspaces.map((entry) => {
-                const isActive = entry.id === workspace?.id;
-                return (
-                  <div className="workspace-list-row" key={entry.id}>
-                    <button
-                      type="button"
-                      className={`workspace-list-item${isActive ? " workspace-list-item-active" : ""}`}
-                      aria-label={`Open ${entry.name}`}
-                      onClick={() => handleWorkspaceSelect(entry.id)}
-                    >
-                      <span>{entry.name}</span>
-                      <small>{paneCount(entry.layout)} panes</small>
-                    </button>
-                    <button
-                      type="button"
-                      className="workspace-list-close"
-                      aria-label={`Close ${entry.name}`}
-                      disabled={workspaces.length <= 1}
-                      onClick={() => void handleCloseWorkspace(entry.id)}
-                    >
-                      ×
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-            {closeError ? (
-              <p className="create-error" role="alert">
-                {closeError}
-              </p>
-            ) : null}
-          </div>
-
-          <div className="workspace-rail-section workspace-create">
-            <strong>New Workspace</strong>
-            <label>
-              <span>Workspace Name</span>
-              <input
-                value={createForm.name}
-                onChange={(event) =>
-                  setCreateForm((prev) => ({ ...prev, name: event.target.value }))
-                }
-              />
-            </label>
-            <label>
-              <span>Root Directory</span>
-              <input
-                value={createForm.rootDir}
-                onChange={(event) =>
-                  setCreateForm((prev) => ({ ...prev, rootDir: event.target.value }))
-                }
-              />
-            </label>
-            <label>
-              <span>Shell Profile</span>
-              <input
-                value={createForm.shellProfile}
-                onChange={(event) =>
-                  setCreateForm((prev) => ({ ...prev, shellProfile: event.target.value }))
-                }
-              />
-            </label>
-            <button type="button" onClick={() => void handleCreateWorkspace()}>
-              Create Workspace
-            </button>
-            {createError ? (
-              <p className="create-error" role="alert">
-                {createError}
-              </p>
-            ) : null}
-          </div>
-
-          <div className="workspace-rail-section workspace-create">
-            <strong>Rename Workspace</strong>
-            <label>
-              <span>Rename Workspace</span>
-              <input
-                value={renameName}
-                onChange={(event) => setRenameName(event.target.value)}
-                disabled={isRenaming || !workspace}
-                maxLength={255}
-              />
-            </label>
-            <button
-              type="button"
-              disabled={isRenaming || !workspace || !renameName.trim()}
-              onClick={() => void handleRenameWorkspace()}
-            >
-              Save Workspace Name
-            </button>
-            {renameError ? (
-              <p className="create-error" role="alert">
-                {renameError}
-              </p>
-            ) : null}
-          </div>
-
-          <ThemeSelector />
-        </aside>
+        ) : null}
+        {restartError ? (
+          <p className="operation-error" role="status">
+            {restartError}
+          </p>
+        ) : null}
+        {paneCloseError ? (
+          <p className="operation-error" role="status">
+            {paneCloseError}
+          </p>
+        ) : null}
+        {closeError ? (
+          <p className="operation-error" role="status">
+            {closeError}
+          </p>
+        ) : null}
 
         {workspace ? (
-          <section className="workspace-panel">
-            <div className="workspace-toolbar">
-              <div>
-                <strong>{workspace.rootDir}</strong>
-                <span>{paneCount(workspace.layout)} panes</span>
-              </div>
-              <div className="toolbar-buttons">
-                <button type="button" onClick={() => handleSplit("vertical")}>
-                  Split Right
-                </button>
-                <button type="button" onClick={() => handleSplit("horizontal")}>
-                  Split Down
-                </button>
-              </div>
-            </div>
-
-            {splitError ? (
-              <p className="operation-error" role="status">
-                {splitError}
-              </p>
-            ) : null}
-            {restartError ? (
-              <p className="operation-error" role="status">
-                {restartError}
-              </p>
-            ) : null}
-            {paneCloseError ? (
-              <p className="operation-error" role="status">
-                {paneCloseError}
-              </p>
-            ) : null}
-
-            <WorkspaceSplitView
-              workspace={workspace}
-              activeTheme={state?.activeTheme}
-              onFocusPane={handleFocus}
-              onClosePane={handleClose}
-              onRestartPane={handleRestartPane}
-            />
-          </section>
+          <WorkspaceSplitView
+            workspace={workspace}
+            activeTheme={state?.activeTheme}
+            onFocusPane={handleFocus}
+            onClosePane={handleClose}
+            onRestartPane={handleRestartPane}
+          />
         ) : (
-          <section className="workspace-panel workspace-panel-empty">
-            <p>Waiting for desktop state…</p>
-          </section>
+          <div className="workspace-empty">
+            <p>No workspaces</p>
+            <p>Press Ctrl+N to create one</p>
+          </div>
         )}
       </section>
+
+      <StatusBar workspace={workspace} notificationCount={totalNotifications} />
+
+      <CreateWorkspaceModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        onCreate={handleCreateWorkspace}
+        error={createError}
+        defaultRootDir={defaultRootDir}
+        defaultShellProfile={defaultShellProfile}
+      />
     </main>
   );
 }

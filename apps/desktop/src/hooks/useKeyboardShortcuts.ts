@@ -8,6 +8,9 @@ type KeyboardShortcutsConfig = {
   } | null;
   onSplitVertical: () => void;
   onSplitHorizontal: () => void;
+  onNewWorkspace: () => void;
+  onWorkspaceJump: (index: number) => void;
+  onToggleSidebar: () => void;
 };
 
 /**
@@ -15,7 +18,14 @@ type KeyboardShortcutsConfig = {
  * Skips dispatch when focus is inside xterm unless it's a global shortcut.
  */
 export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
-  const { workspace, onSplitVertical, onSplitHorizontal } = config;
+  const {
+    workspace,
+    onSplitVertical,
+    onSplitHorizontal,
+    onNewWorkspace,
+    onWorkspaceJump,
+    onToggleSidebar,
+  } = config;
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -47,6 +57,28 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
         }
       }
 
+      // Ctrl+N for new workspace (works inside terminal too)
+      if (event.ctrlKey && !event.shiftKey && !event.altKey) {
+        if (event.key.toLowerCase() === "n") {
+          event.preventDefault();
+          onNewWorkspace();
+          return;
+        }
+        // Ctrl+B for toggle sidebar
+        if (event.key.toLowerCase() === "b") {
+          event.preventDefault();
+          onToggleSidebar();
+          return;
+        }
+        // Ctrl+1-9 for workspace switching
+        const digit = parseInt(event.key);
+        if (digit >= 1 && digit <= 9) {
+          event.preventDefault();
+          onWorkspaceJump(digit - 1);
+          return;
+        }
+      }
+
       // Skip non-global shortcuts when inside terminal/input
       if (isInTerminal) {
         return;
@@ -67,5 +99,12 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [workspace, onSplitVertical, onSplitHorizontal]);
+  }, [
+    workspace,
+    onSplitVertical,
+    onSplitHorizontal,
+    onNewWorkspace,
+    onWorkspaceJump,
+    onToggleSidebar,
+  ]);
 }

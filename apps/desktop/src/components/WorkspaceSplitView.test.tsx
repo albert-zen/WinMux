@@ -73,32 +73,16 @@ describe("WorkspaceSplitView", () => {
       expect(queryByTestId("split-handle-p1")).toBeNull();
     });
 
-    it("disables the close button when only one pane remains", () => {
-      const workspace = makeWorkspace();
-      const { getByRole } = render(
-        <WorkspaceSplitView workspace={workspace} {...makeProps()} />
-      );
-
-      expect(
-        (getByRole("button", { name: "Close p1" }) as HTMLButtonElement).disabled
-      ).toBe(true);
-    });
-
-    it("calls onRestartPane for an exited pane", () => {
-      const onRestartPane = vi.fn();
+    it("adds notification class for exited pane", () => {
       const workspace = makeWorkspace({
         paneStates: { p1: makePane("p1", { status: "exited" }) },
       });
-      const { getByText } = render(
-        <WorkspaceSplitView
-          workspace={workspace}
-          {...makeProps({ onRestartPane })}
-        />
+      const { getByTestId } = render(
+        <WorkspaceSplitView workspace={workspace} {...makeProps()} />
       );
 
-      fireEvent.click(getByText("Restart"));
-
-      expect(onRestartPane).toHaveBeenCalledWith("p1");
+      const pane = getByTestId("split-pane-p1");
+      expect(pane.className).toContain("split-pane-notification");
     });
   });
 
@@ -169,7 +153,7 @@ describe("WorkspaceSplitView", () => {
 
       const splitNode = container.querySelector(".split-node-vertical");
       expect(splitNode).toBeTruthy();
-      expect(splitNode!.style.gridTemplateColumns).toBe("0.5fr 4px 0.5fr");
+      expect(splitNode!.style.gridTemplateColumns).toBe("0.5fr 3px 0.5fr");
     });
 
     it("dragging a handle updates gridTemplateColumns", () => {
@@ -236,21 +220,6 @@ describe("WorkspaceSplitView", () => {
       fireEvent.click(getByTestId("split-pane-p1"));
 
       expect(onFocusPane).not.toHaveBeenCalled();
-    });
-
-    it("calls onClosePane when the close button is clicked", () => {
-      const onClosePane = vi.fn();
-      const workspace = makeTwoPaneWorkspace();
-      const { getByRole } = render(
-        <WorkspaceSplitView
-          workspace={workspace}
-          {...makeProps({ onClosePane })}
-        />
-      );
-
-      fireEvent.click(getByRole("button", { name: "Close p2" }));
-
-      expect(onClosePane).toHaveBeenCalledWith("p2");
     });
 
     it("keeps the focused pane highlighted through output and session updates", () => {
@@ -454,22 +423,6 @@ describe("WorkspaceSplitView", () => {
       );
     });
 
-    it("calls onClosePane for any pane", () => {
-      const onClosePane = vi.fn();
-      const workspace = makeThreePaneWorkspace();
-      const { getByRole } = render(
-        <WorkspaceSplitView
-          workspace={workspace}
-          {...makeProps({ onClosePane })}
-        />
-      );
-
-      fireEvent.click(getByRole("button", { name: "Close p2" }));
-      expect(onClosePane).toHaveBeenCalledWith("p2");
-
-      fireEvent.click(getByRole("button", { name: "Close p3" }));
-      expect(onClosePane).toHaveBeenCalledWith("p3");
-    });
   });
 
   describe("horizontal split", () => {
@@ -502,7 +455,7 @@ describe("WorkspaceSplitView", () => {
 
       const splitNode = container.querySelector(".split-node-horizontal");
       expect(splitNode).toBeTruthy();
-      expect(splitNode!.style.gridTemplateRows).toBe("0.5fr 4px 0.5fr");
+      expect(splitNode!.style.gridTemplateRows).toBe("0.5fr 3px 0.5fr");
     });
   });
 
