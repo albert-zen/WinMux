@@ -28,7 +28,6 @@ function App() {
   const [paneCloseError, setPaneCloseError] = useState<string | null>(null);
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [notificationCounts, setNotificationCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const nextWorkspaces = state?.workspaces ?? [];
@@ -68,6 +67,12 @@ function App() {
     pendingWorkspace && !state?.workspaces.some((entry) => entry.id === pendingWorkspace.id)
       ? [...(state?.workspaces ?? []), pendingWorkspace]
       : (state?.workspaces ?? []);
+
+  // Derive notification counts from workspace state
+  const notificationCounts = Object.fromEntries(
+    workspaces.map((ws) => [ws.id, ws.unreadNotificationCount ?? 0])
+  );
+
   const workspace =
     workspaces.find((entry) => entry.id === activeWorkspaceId) ?? workspaces[0] ?? null;
 
@@ -101,6 +106,7 @@ function App() {
             output: "",
           },
         },
+        unreadNotificationCount: 0,
       });
       setActiveWorkspaceId(result.workspaceId);
       setIsCreateModalOpen(false);

@@ -73,6 +73,7 @@ export type WorkspaceState = {
   focusedPaneId: string;
   layout: LayoutNode;
   paneStates: Record<string, PaneState>;
+  unreadNotificationCount: number;
 };
 
 export function collectPaneIds(node: LayoutNode): string[] {

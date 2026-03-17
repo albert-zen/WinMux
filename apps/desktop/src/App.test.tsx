@@ -74,6 +74,7 @@ function makeState(overrides: Partial<ReturnType<typeof useDesktopState>> = {}) 
               output: "hello from pane-1",
             },
           },
+          unreadNotificationCount: 0,
         },
       ],
     },

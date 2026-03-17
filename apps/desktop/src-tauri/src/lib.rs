@@ -60,6 +60,7 @@ struct WorkspaceState {
     focused_pane_id: String,
     layout: LayoutNode,
     pane_states: HashMap<String, PaneState>,
+    unread_notification_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -235,6 +236,13 @@ where
                     );
                 }
 
+                let unread_notification_count = self
+                    .notifications
+                    .list_by_workspace(&workspace.id)
+                    .iter()
+                    .filter(|n| !n.read)
+                    .count() as u32;
+
                 WorkspaceState {
                     id: workspace.id.clone(),
                     name: workspace.name.clone(),
@@ -243,6 +251,7 @@ where
                     focused_pane_id: workspace.layout.focused_pane_id().to_string(),
                     layout: workspace.layout.root().clone(),
                     pane_states,
+                    unread_notification_count,
                 }
             })
             .collect();
