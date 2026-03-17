@@ -3,6 +3,7 @@ export const PROTOCOL_VERSION = 1 as const;
 export const STARTER_WORKSPACE_NAME = "inbox";
 export const STARTER_PANE_ID = "pane-1";
 export const SESSION_OUTPUT_EVENT = "session-output";
+export const DOMAIN_EVENT = "domain-event";
 
 export const METADATA_REFRESH_POLICY = {
   strategy: "hybrid",
@@ -112,3 +113,14 @@ export function applyScrollbackCap(
         : snapshot.scrollback
   };
 }
+
+export type DomainEvent =
+  | { type: "workspaceCreated"; workspaceId: string }
+  | { type: "workspaceRenamed"; workspaceId: string; name: string }
+  | { type: "workspaceClosed"; workspaceId: string }
+  | { type: "paneSplit"; workspaceId: string; paneId: string; newPaneId: string }
+  | { type: "paneClosed"; workspaceId: string; paneId: string }
+  | { type: "paneFocused"; workspaceId: string; paneId: string }
+  | { type: "sessionStarted"; sessionId: string; workspaceId: string; paneId: string }
+  | { type: "sessionExited"; sessionId: string }
+  | { type: "notificationCreated"; notificationId: string };

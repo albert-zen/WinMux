@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
+  DOMAIN_EVENT,
   METADATA_REFRESH_POLICY,
   SESSION_OUTPUT_EVENT,
   type DesktopState,
+  type DomainEvent,
   type SessionOutputEvent,
 } from "@cmux-win/protocol";
 
@@ -36,7 +38,7 @@ export function useDesktopState(): UseDesktopStateResult {
     loadState();
     const timer = window.setInterval(loadState, METADATA_REFRESH_POLICY.fallbackIntervalMs);
 
-    const unlistenPromise = listen<SessionOutputEvent>(
+    const unlistenOutput = listen<SessionOutputEvent>(
       SESSION_OUTPUT_EVENT,
       (event) => {
         if (cancelled) return;
@@ -60,10 +62,16 @@ export function useDesktopState(): UseDesktopStateResult {
       },
     );
 
+    const unlistenDomain = listen<DomainEvent>(DOMAIN_EVENT, () => {
+      if (cancelled) return;
+      loadState();
+    });
+
     return () => {
       cancelled = true;
       window.clearInterval(timer);
-      unlistenPromise.then((unlisten) => unlisten());
+      unlistenOutput.then((unlisten) => unlisten());
+      unlistenDomain.then((unlisten) => unlisten());
     };
   }, []);
 

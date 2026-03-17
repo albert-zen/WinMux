@@ -15,6 +15,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+core-events = { path = "../../../crates/core-events" }
 core-ipc = { path = "../../../crates/core-ipc" }
 core-layout = { path = "../../../crates/core-layout" }
 core-session = { path = "../../../crates/core-session" }

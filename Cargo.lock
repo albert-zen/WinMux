@@ -560,6 +560,7 @@ dependencies = [
 name = "cmux-win-desktop"
 version = "0.1.0"
 dependencies = [
+ "core-events",
  "core-ipc",
  "core-layout",
  "core-session",

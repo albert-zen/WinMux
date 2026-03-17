@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+use core_events::DomainEvent;
 use core_ipc::{ErrorCode, ProtocolError, RequestEnvelope, ResponseEnvelope, ResponseExt, RuntimeContext};
 use core_session::{
     LiveSessionRegistry, PtySessionFactory, SessionHostFactory, SessionRuntimeError, SessionSpec,
@@ -18,6 +19,7 @@ use tauri::Emitter;
 
 pub const PIPE_NAME: &str = r"\\.\pipe\cmux-win-v1";
 pub const SESSION_OUTPUT_EVENT_NAME: &str = "session-output";
+pub const DOMAIN_EVENT_NAME: &str = "domain-event";
 
 type AppRuntime = RuntimeState<PtySessionFactory>;
 
@@ -262,6 +264,7 @@ fn workspace_create(
     root_dir: String,
     shell_profile: String,
     state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<Value, String> {
     let request = RequestEnvelope::new(
         "desktop-workspace-create",
@@ -274,7 +277,11 @@ fn workspace_create(
     );
     let response = dispatch_runtime_request(&request, &mut state.runtime.lock().unwrap());
     if response.is_ok() {
-        Ok(response.result().cloned().unwrap_or_else(|| json!({})))
+        let result = response.result().cloned().unwrap_or_else(|| json!({}));
+        if let Some(ws_id) = result["workspaceId"].as_str() {
+            let _ = app_handle.emit(DOMAIN_EVENT_NAME, DomainEvent::workspace_created(ws_id));
+        }
+        Ok(result)
     } else {
         Err(response
             .error()
@@ -289,21 +296,27 @@ fn pane_split(
     pane_id: String,
     direction: String,
     state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
     let orientation = normalize_split_direction(&direction)?;
+    let new_pane = next_pane_id();
     let request = RequestEnvelope::new(
         "desktop-pane-split",
         "pane.split",
         json!({
             "workspaceId": workspace_id,
             "paneId": pane_id,
-            "newPaneId": next_pane_id(),
+            "newPaneId": new_pane,
             "orientation": orientation,
             "ratio": 0.5,
         }),
     );
     let response = dispatch_runtime_request(&request, &mut state.runtime.lock().unwrap());
     if response.is_ok() {
+        let _ = app_handle.emit(
+            DOMAIN_EVENT_NAME,
+            DomainEvent::pane_split(&workspace_id, &pane_id, &new_pane),
+        );
         Ok(())
     } else {
         Err(response
@@ -318,6 +331,7 @@ fn pane_focus(
     workspace_id: String,
     pane_id: String,
     state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
     let request = RequestEnvelope::new(
         "desktop-pane-focus",
@@ -329,6 +343,10 @@ fn pane_focus(
     );
     let response = dispatch_runtime_request(&request, &mut state.runtime.lock().unwrap());
     if response.is_ok() {
+        let _ = app_handle.emit(
+            DOMAIN_EVENT_NAME,
+            DomainEvent::pane_focused(&workspace_id, &pane_id),
+        );
         Ok(())
     } else {
         Err(response
@@ -343,6 +361,7 @@ fn pane_close(
     workspace_id: String,
     pane_id: String,
     state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
     let request = RequestEnvelope::new(
         "desktop-pane-close",
@@ -354,6 +373,10 @@ fn pane_close(
     );
     let response = dispatch_runtime_request(&request, &mut state.runtime.lock().unwrap());
     if response.is_ok() {
+        let _ = app_handle.emit(
+            DOMAIN_EVENT_NAME,
+            DomainEvent::pane_closed(&workspace_id, &pane_id),
+        );
         Ok(())
     } else {
         Err(response
@@ -367,6 +390,7 @@ fn pane_close(
 fn workspace_close(
     workspace_id: String,
     state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
     let request = RequestEnvelope::new(
         "desktop-workspace-close",
@@ -377,6 +401,10 @@ fn workspace_close(
     );
     let response = dispatch_runtime_request(&request, &mut state.runtime.lock().unwrap());
     if response.is_ok() {
+        let _ = app_handle.emit(
+            DOMAIN_EVENT_NAME,
+            DomainEvent::workspace_closed(&workspace_id),
+        );
         Ok(())
     } else {
         Err(response
@@ -391,6 +419,7 @@ fn workspace_rename(
     workspace_id: String,
     name: String,
     state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
     let request = RequestEnvelope::new(
         "desktop-workspace-rename",
@@ -402,6 +431,10 @@ fn workspace_rename(
     );
     let response = dispatch_runtime_request(&request, &mut state.runtime.lock().unwrap());
     if response.is_ok() {
+        let _ = app_handle.emit(
+            DOMAIN_EVENT_NAME,
+            DomainEvent::workspace_renamed(&workspace_id, &name),
+        );
         Ok(())
     } else {
         Err(response

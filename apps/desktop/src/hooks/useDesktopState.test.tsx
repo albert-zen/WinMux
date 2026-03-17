@@ -4,7 +4,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useDesktopState } from "./useDesktopState";
-import { SESSION_OUTPUT_EVENT } from "@cmux-win/protocol";
+import { DOMAIN_EVENT, SESSION_OUTPUT_EVENT } from "@cmux-win/protocol";
 
 function HookProbe() {
   const { state, error } = useDesktopState();
@@ -43,6 +43,7 @@ describe("useDesktopState", () => {
 
     expect(invoke).toHaveBeenCalledWith("desktop_state");
     expect(listen).toHaveBeenCalledWith(SESSION_OUTPUT_EVENT, expect.any(Function));
+    expect(listen).toHaveBeenCalledWith(DOMAIN_EVENT, expect.any(Function));
   });
 
   it("polls desktop_state on the refresh interval", async () => {
@@ -126,8 +127,10 @@ describe("useDesktopState", () => {
         },
       ],
     });
-    vi.mocked(listen).mockImplementation(async (_eventName, handler) => {
-      eventHandler = handler as typeof eventHandler;
+    vi.mocked(listen).mockImplementation(async (eventName, handler) => {
+      if (eventName === SESSION_OUTPUT_EVENT) {
+        eventHandler = handler as typeof eventHandler;
+      }
       return vi.fn();
     });
 
@@ -182,8 +185,10 @@ describe("useDesktopState", () => {
         },
       ],
     });
-    vi.mocked(listen).mockImplementation(async (_eventName, handler) => {
-      eventHandler = handler as typeof eventHandler;
+    vi.mocked(listen).mockImplementation(async (eventName, handler) => {
+      if (eventName === SESSION_OUTPUT_EVENT) {
+        eventHandler = handler as typeof eventHandler;
+      }
       return vi.fn();
     });
 
@@ -239,8 +244,10 @@ describe("useDesktopState", () => {
         },
       ],
     });
-    vi.mocked(listen).mockImplementation(async (_eventName, handler) => {
-      eventHandler = handler as typeof eventHandler;
+    vi.mocked(listen).mockImplementation(async (eventName, handler) => {
+      if (eventName === SESSION_OUTPUT_EVENT) {
+        eventHandler = handler as typeof eventHandler;
+      }
       return vi.fn();
     });
 
@@ -261,5 +268,52 @@ describe("useDesktopState", () => {
 
     expect(screen.getByTestId("state").textContent).toContain("\"output\":\"replacement\"");
     expect(screen.getByTestId("state").textContent).not.toContain("old-output");
+  });
+
+  it("refreshes state on domain event", async () => {
+    let domainHandler: ((event: { payload: unknown }) => void) | undefined;
+    let callCount = 0;
+
+    vi.mocked(invoke).mockImplementation(async () => {
+      callCount += 1;
+      return {
+        protocolVersion: 1,
+        workspaces: [
+          {
+            id: "ws-inbox",
+            name: callCount <= 1 ? "inbox" : "inbox-updated",
+            rootDir: "D:\\dev\\inbox",
+            shellProfile: "cmd.exe",
+            focusedPaneId: "pane-1",
+            panes: [
+              {
+                paneId: "pane-1",
+                sessionId: "session:1",
+                status: "running",
+                output: "",
+              },
+            ],
+          },
+        ],
+      };
+    });
+    vi.mocked(listen).mockImplementation(async (eventName, handler) => {
+      if (eventName === DOMAIN_EVENT) {
+        domainHandler = handler as typeof domainHandler;
+      }
+      return vi.fn();
+    });
+
+    render(<HookProbe />);
+    await flushMicrotasks();
+
+    expect(screen.getByTestId("state").textContent).toContain('"name":"inbox"');
+
+    await act(async () => {
+      domainHandler?.({ payload: { type: "workspaceRenamed", workspaceId: "ws-inbox", name: "inbox-updated" } });
+    });
+    await flushMicrotasks();
+
+    expect(screen.getByTestId("state").textContent).toContain('"name":"inbox-updated"');
   });
 });
