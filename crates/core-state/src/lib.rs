@@ -10,8 +10,17 @@ pub const STARTER_WORKSPACE_NAME: &str = "inbox";
 pub enum RestoreError {
     InvalidJson,
     UnsupportedProtocolVersion,
+    UnsupportedVersion,
     DuplicateWorkspaceId,
     EmptyWorkspaceLayout,
+}
+
+/// Result of restoring a registry from persisted JSON, including optional
+/// metadata that was stored alongside the workspace list.
+#[derive(Debug, Clone)]
+pub struct RestoreResult {
+    pub registry: WorkspaceRegistry,
+    pub active_workspace_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -19,6 +28,8 @@ pub enum RestoreError {
 struct PersistedRegistry {
     protocol_version: u32,
     workspaces: Vec<PersistedWorkspace>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    active_workspace_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -315,6 +326,14 @@ impl WorkspaceRegistry {
 
     /// Serialize the registry to JSON for persistence.
     pub fn to_persisted_json(&self) -> serde_json::Result<String> {
+        self.to_persisted_json_with_active(None)
+    }
+
+    /// Serialize the registry to JSON for persistence, including the active workspace ID.
+    pub fn to_persisted_json_with_active(
+        &self,
+        active_id: Option<&str>,
+    ) -> serde_json::Result<String> {
         let persisted = PersistedRegistry {
             protocol_version: 1,
             workspaces: self
@@ -328,22 +347,43 @@ impl WorkspaceRegistry {
                     layout: ws.layout.clone(),
                 })
                 .collect(),
+            active_workspace_id: active_id.map(String::from),
         };
         serde_json::to_string(&persisted)
     }
 
     /// Restore a registry from persisted JSON.
     pub fn from_persisted_json(json: &str) -> Result<Self, RestoreError> {
-        let persisted: PersistedRegistry =
+        let result = Self::from_persisted_json_with_active(json)?;
+        Ok(result.registry)
+    }
+
+    /// Restore a registry from persisted JSON, also returning the active workspace ID if present.
+    pub fn from_persisted_json_with_active(json: &str) -> Result<RestoreResult, RestoreError> {
+        // First do a loose parse to check version field presence and value.
+        let raw: serde_json::Value =
             serde_json::from_str(json).map_err(|_| RestoreError::InvalidJson)?;
-        if persisted.protocol_version != 1 {
-            return Err(RestoreError::UnsupportedProtocolVersion);
+        let version_value = raw.get("protocolVersion");
+        match version_value {
+            None => return Err(RestoreError::InvalidJson),
+            Some(v) => {
+                let v_num = v.as_u64().ok_or(RestoreError::InvalidJson)?;
+                if v_num > 1 {
+                    return Err(RestoreError::UnsupportedVersion);
+                }
+                if v_num != 1 {
+                    return Err(RestoreError::UnsupportedProtocolVersion);
+                }
+            }
         }
+
+        let persisted: PersistedRegistry =
+            serde_json::from_value(raw).map_err(|_| RestoreError::InvalidJson)?;
 
         let mut registry = Self::new();
         let mut seen_ids = std::collections::HashSet::new();
 
-        for ws in persisted.workspaces {
+        for ws in &persisted.workspaces {
             if !seen_ids.insert(ws.id.clone()) {
                 return Err(RestoreError::DuplicateWorkspaceId);
             }
@@ -351,15 +391,32 @@ impl WorkspaceRegistry {
                 return Err(RestoreError::EmptyWorkspaceLayout);
             }
             registry.workspaces.push(WorkspaceRecord {
-                id: ws.id,
-                name: ws.name,
-                root_dir: ws.root_dir,
-                shell_profile: ws.shell_profile,
-                layout: ws.layout,
+                id: ws.id.clone(),
+                name: ws.name.clone(),
+                root_dir: ws.root_dir.clone(),
+                shell_profile: ws.shell_profile.clone(),
+                layout: ws.layout.clone(),
             });
         }
 
-        Ok(registry)
+        // Validate active workspace ID: only return it if it exists in the registry.
+        let active_workspace_id = persisted
+            .active_workspace_id
+            .filter(|id| registry.workspaces.iter().any(|ws| ws.id == *id));
+
+        Ok(RestoreResult {
+            registry,
+            active_workspace_id,
+        })
+    }
+
+    /// Collect all pane IDs across all workspaces in the registry.
+    #[must_use]
+    pub fn all_pane_ids(&self) -> Vec<String> {
+        self.workspaces
+            .iter()
+            .flat_map(|ws| ws.layout.panes().into_iter().map(|p| p.pane_id.clone()))
+            .collect()
     }
 }
 
@@ -789,6 +846,113 @@ mod tests {
 
         let err = WorkspaceRegistry::from_persisted_json(json).unwrap_err();
 
-        assert_eq!(err, RestoreError::UnsupportedProtocolVersion);
+        assert_eq!(err, RestoreError::UnsupportedVersion);
+    }
+
+    // ── New persistence hardening tests ──────────────────────────────────
+
+    #[test]
+    fn persisted_state_includes_active_workspace_id() {
+        let reg = make_registry_with_two();
+
+        let json = reg
+            .to_persisted_json_with_active(Some("ws-b"))
+            .expect("serialization should succeed");
+        let result = WorkspaceRegistry::from_persisted_json_with_active(&json)
+            .expect("restore should succeed");
+
+        assert_eq!(result.active_workspace_id.as_deref(), Some("ws-b"));
+        assert_eq!(result.registry.list().len(), 2);
+    }
+
+    #[test]
+    fn persisted_state_with_no_active_workspace_id_returns_none() {
+        let reg = make_registry_with_two();
+
+        let json = reg
+            .to_persisted_json_with_active(None)
+            .expect("serialization should succeed");
+        let result = WorkspaceRegistry::from_persisted_json_with_active(&json)
+            .expect("restore should succeed");
+
+        assert_eq!(result.active_workspace_id, None);
+    }
+
+    #[test]
+    fn persisted_state_with_invalid_active_workspace_id_returns_none() {
+        let reg = make_registry_with_two();
+
+        let json = reg
+            .to_persisted_json_with_active(Some("ws-nonexistent"))
+            .expect("serialization should succeed");
+        let result = WorkspaceRegistry::from_persisted_json_with_active(&json)
+            .expect("restore should succeed");
+
+        assert_eq!(result.active_workspace_id, None);
+    }
+
+    #[test]
+    fn all_pane_ids_collects_across_workspaces() {
+        let mut reg = make_registry_with_two();
+        // ws-a: split pane-1 -> pane-2
+        reg.split_pane("ws-a", "pane-1", "pane-2", SplitOrientation::Vertical, 0.5)
+            .expect("split should succeed");
+        // ws-b: split pane-1 -> pane-3, then pane-3 -> pane-4
+        reg.split_pane("ws-b", "pane-1", "pane-3", SplitOrientation::Horizontal, 0.5)
+            .expect("split should succeed");
+        reg.split_pane("ws-b", "pane-3", "pane-4", SplitOrientation::Vertical, 0.5)
+            .expect("split should succeed");
+
+        let mut ids = reg.all_pane_ids();
+        ids.sort();
+
+        assert_eq!(ids, vec!["pane-1", "pane-1", "pane-2", "pane-3", "pane-4"]);
+    }
+
+    #[test]
+    fn persisted_state_rejects_future_version() {
+        let json = r#"{
+            "protocolVersion": 2,
+            "workspaces": []
+        }"#;
+
+        let err = WorkspaceRegistry::from_persisted_json(json).unwrap_err();
+
+        assert_eq!(err, RestoreError::UnsupportedVersion);
+    }
+
+    #[test]
+    fn persisted_state_rejects_missing_version() {
+        let json = r#"{
+            "workspaces": []
+        }"#;
+
+        let err = WorkspaceRegistry::from_persisted_json(json).unwrap_err();
+
+        assert_eq!(err, RestoreError::InvalidJson);
+    }
+
+    #[test]
+    fn focus_persists_through_save_restore_cycle() {
+        let mut reg = make_registry_with_two();
+        // Split ws-a to get pane-2, then focus back on pane-1
+        reg.split_pane("ws-a", "pane-1", "pane-2", SplitOrientation::Vertical, 0.5)
+            .expect("split should succeed");
+        reg.focus_pane("ws-a", "pane-1").expect("focus should succeed");
+
+        // Split ws-b to get pane-3, focus stays on pane-3 (the new pane)
+        reg.split_pane("ws-b", "pane-1", "pane-3", SplitOrientation::Horizontal, 0.5)
+            .expect("split should succeed");
+
+        let json = reg
+            .to_persisted_json()
+            .expect("serialization should succeed");
+        let restored =
+            WorkspaceRegistry::from_persisted_json(&json).expect("restore should succeed");
+
+        // ws-a: focused pane should be pane-1 (we explicitly focused it)
+        assert_eq!(restored.list()[0].layout.focused_pane_id(), "pane-1");
+        // ws-b: focused pane should be pane-3 (the last split target)
+        assert_eq!(restored.list()[1].layout.focused_pane_id(), "pane-3");
     }
 }
