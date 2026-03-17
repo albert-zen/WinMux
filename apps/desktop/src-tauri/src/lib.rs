@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use core_ipc::{ErrorCode, ProtocolError, RequestEnvelope, ResponseEnvelope, ResponseExt};
+use core_ipc::{ErrorCode, ProtocolError, RequestEnvelope, ResponseEnvelope, ResponseExt, RuntimeContext};
 use core_session::{
     LiveSessionRegistry, PtySessionFactory, SessionHostFactory, SessionRuntimeError, SessionSpec,
     TerminalSize,
@@ -547,11 +547,15 @@ where
         "pane.focus" => handle_pane_focus(request, runtime),
         "pane.close" => handle_pane_close(request, runtime),
         "session.start" => handle_session_start(request, runtime),
-        "session.sendInput" => handle_session_send_input(request, runtime),
-        "session.resize" => handle_session_resize(request, runtime),
-        "session.restart" => handle_session_restart(request, runtime),
-        "session.getStatus" => handle_session_get_status(request, runtime),
         "app.getState" => handle_app_get_state(request, runtime),
+        // Session commands delegate to the unified core-ipc dispatch_runtime
+        "session.sendInput" | "session.resize" | "session.restart" | "session.getStatus" => {
+            let mut ctx = RuntimeContext {
+                registry: &mut runtime.registry,
+                sessions: &mut runtime.sessions,
+            };
+            core_ipc::dispatch_runtime(request, &mut ctx)
+        }
         _ => core_ipc::dispatch(request, &mut runtime.registry),
     }
 }
@@ -903,54 +907,6 @@ where
     }
 }
 
-fn handle_session_restart<F>(
-    request: &RequestEnvelope,
-    runtime: &mut RuntimeState<F>,
-) -> ResponseEnvelope
-where
-    F: SessionHostFactory,
-{
-    let session_id = request.payload()["sessionId"].as_str().unwrap_or_default();
-
-    match runtime.sessions.restart(session_id) {
-        Ok(restarted_session_id) => match runtime.sessions.get_status(&restarted_session_id) {
-            Ok(snapshot) => ResponseEnvelope::success(
-                request.id(),
-                json!({
-                    "sessionId": restarted_session_id,
-                    "workspaceId": snapshot.workspace_id,
-                    "paneId": snapshot.pane_id,
-                }),
-            ),
-            Err(error) => runtime_error_response(request.id(), error),
-        },
-        Err(error) => runtime_error_response(request.id(), error),
-    }
-}
-
-fn handle_session_send_input<F>(
-    request: &RequestEnvelope,
-    runtime: &mut RuntimeState<F>,
-) -> ResponseEnvelope
-where
-    F: SessionHostFactory,
-{
-    let payload = request.payload();
-    let session_id = payload["sessionId"].as_str().unwrap_or_default();
-    let data = payload["data"].as_str().unwrap_or_default();
-
-    match runtime.sessions.send_input(session_id, data.as_bytes()) {
-        Ok(()) => ResponseEnvelope::success(
-            request.id(),
-            json!({
-                "delivered": true,
-                "sessionId": session_id,
-            }),
-        ),
-        Err(error) => runtime_error_response(request.id(), error),
-    }
-}
-
 fn handle_app_get_state<F>(
     request: &RequestEnvelope,
     runtime: &mut RuntimeState<F>,
@@ -962,59 +918,6 @@ where
         request.id(),
         serde_json::to_value(runtime.snapshot()).unwrap_or_else(|_| json!({ "workspaces": [] })),
     )
-}
-
-fn handle_session_resize<F>(
-    request: &RequestEnvelope,
-    runtime: &mut RuntimeState<F>,
-) -> ResponseEnvelope
-where
-    F: SessionHostFactory,
-{
-    let payload = request.payload();
-    let session_id = payload["sessionId"].as_str().unwrap_or_default();
-    let cols = payload["cols"].as_u64().unwrap_or(80) as u16;
-    let rows = payload["rows"].as_u64().unwrap_or(24) as u16;
-
-    match runtime
-        .sessions
-        .resize(session_id, TerminalSize { rows, cols })
-    {
-        Ok(()) => ResponseEnvelope::success(
-            request.id(),
-            json!({
-                "resized": true,
-                "sessionId": session_id,
-            }),
-        ),
-        Err(error) => runtime_error_response(request.id(), error),
-    }
-}
-
-fn handle_session_get_status<F>(
-    request: &RequestEnvelope,
-    runtime: &mut RuntimeState<F>,
-) -> ResponseEnvelope
-where
-    F: SessionHostFactory,
-{
-    let session_id = request.payload()["sessionId"].as_str().unwrap_or_default();
-
-    match runtime.sessions.get_status(session_id) {
-        Ok(snapshot) => ResponseEnvelope::success(
-            request.id(),
-            json!({
-                "sessionId": snapshot.session_id,
-                "workspaceId": snapshot.workspace_id,
-                "paneId": snapshot.pane_id,
-                "command": snapshot.command,
-                "status": snapshot.status,
-                "exitCode": snapshot.exit_code,
-                "output": snapshot.output,
-            }),
-        ),
-        Err(error) => runtime_error_response(request.id(), error),
-    }
 }
 
 fn drain_and_emit_output_events<F, Emit>(

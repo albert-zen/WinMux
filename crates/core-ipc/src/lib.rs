@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use core_layout::{LayoutError, SplitOrientation, WorkspaceLayout};
+use core_session::{LiveSessionRegistry, SessionHostFactory, SessionRuntimeError, TerminalSize};
 use core_state::{WorkspaceError, WorkspaceRegistry};
 
 pub const CRATE_NAME: &str = "core-ipc";
@@ -1342,6 +1343,171 @@ pub fn dispatch_raw(input: &str, registry: &mut WorkspaceRegistry) -> String {
         .unwrap_or_else(|_| r#"{"ok":false,"error":{"code":"internal_error","message":"serialize failed"}}"#.to_string())
 }
 
+// ── Unified runtime dispatch ──────────────────────────────────────────────
+
+/// Unified runtime context for dispatching all command types.
+/// Holds both the workspace registry and the live session registry.
+pub struct RuntimeContext<'a, F: SessionHostFactory> {
+    pub registry: &'a mut WorkspaceRegistry,
+    pub sessions: &'a mut LiveSessionRegistry<F>,
+}
+
+/// Dispatch any command through the unified runtime context.
+/// Handles workspace, pane, session, and app commands.
+pub fn dispatch_runtime<F: SessionHostFactory>(
+    request: &RequestEnvelope,
+    ctx: &mut RuntimeContext<'_, F>,
+) -> ResponseEnvelope {
+    if let Err(err) = validate_request(request) {
+        return ResponseEnvelope::error(request.id(), err);
+    }
+    match request.command() {
+        // Workspace and pane commands delegate to existing dispatch
+        "workspace.create" | "workspace.close" | "workspace.rename"
+        | "pane.split" | "pane.close" | "pane.focus"
+        | "notify.send" => dispatch(request, ctx.registry),
+
+        // Session commands
+        "session.sendInput" => handle_session_send_input(request, ctx),
+        "session.resize" => handle_session_resize(request, ctx),
+        "session.restart" => handle_session_restart(request, ctx),
+        "session.getStatus" => handle_session_get_status(request, ctx),
+
+        _ => ResponseEnvelope::error(
+            request.id(),
+            ProtocolError::new(ErrorCode::Unsupported, format!("Unknown command: {}", request.command())),
+        ),
+    }
+}
+
+/// Parse, validate, dispatch via the unified runtime, and serialize in one call.
+/// Always returns well-formed JSON. Best-effort request-id echo on error.
+pub fn dispatch_runtime_raw<F: SessionHostFactory>(
+    input: &str,
+    ctx: &mut RuntimeContext<'_, F>,
+) -> String {
+    let response = match parse_and_validate_request(input) {
+        Ok(request) => dispatch_runtime(&request, ctx),
+        Err(err) => {
+            let id = serde_json::from_str::<Value>(input)
+                .ok()
+                .and_then(|v| v.get("id")?.as_str().map(String::from))
+                .unwrap_or_default();
+            ResponseEnvelope::error(id, err)
+        }
+    };
+    serde_json::to_string(&response)
+        .unwrap_or_else(|_| r#"{"ok":false,"error":{"code":"internal_error","message":"serialize failed"}}"#.to_string())
+}
+
+fn session_runtime_error_response(id: &str, error: SessionRuntimeError) -> ResponseEnvelope {
+    match error {
+        SessionRuntimeError::SessionNotFound => ResponseEnvelope::error(
+            id,
+            ProtocolError::new(ErrorCode::NotFound, "Session not found"),
+        ),
+        SessionRuntimeError::SessionNotExited => ResponseEnvelope::error(
+            id,
+            ProtocolError::new(ErrorCode::Conflict, "Session has not exited"),
+        ),
+        SessionRuntimeError::PaneAlreadyBound => ResponseEnvelope::error(
+            id,
+            ProtocolError::new(ErrorCode::Conflict, "Pane already has an active session"),
+        ),
+        SessionRuntimeError::Host(message) => {
+            ResponseEnvelope::error(id, ProtocolError::new(ErrorCode::InternalError, message))
+        }
+    }
+}
+
+fn handle_session_send_input<F: SessionHostFactory>(
+    request: &RequestEnvelope,
+    ctx: &mut RuntimeContext<'_, F>,
+) -> ResponseEnvelope {
+    let payload = request.payload();
+    let session_id = payload["sessionId"].as_str().unwrap_or_default();
+    let data = payload["data"].as_str().unwrap_or_default();
+
+    match ctx.sessions.send_input(session_id, data.as_bytes()) {
+        Ok(()) => ResponseEnvelope::success(
+            request.id(),
+            serde_json::json!({
+                "delivered": true,
+                "sessionId": session_id,
+            }),
+        ),
+        Err(error) => session_runtime_error_response(request.id(), error),
+    }
+}
+
+fn handle_session_resize<F: SessionHostFactory>(
+    request: &RequestEnvelope,
+    ctx: &mut RuntimeContext<'_, F>,
+) -> ResponseEnvelope {
+    let payload = request.payload();
+    let session_id = payload["sessionId"].as_str().unwrap_or_default();
+    let cols = payload["cols"].as_u64().unwrap_or(80) as u16;
+    let rows = payload["rows"].as_u64().unwrap_or(24) as u16;
+
+    match ctx.sessions.resize(session_id, TerminalSize { rows, cols }) {
+        Ok(()) => ResponseEnvelope::success(
+            request.id(),
+            serde_json::json!({
+                "resized": true,
+                "sessionId": session_id,
+            }),
+        ),
+        Err(error) => session_runtime_error_response(request.id(), error),
+    }
+}
+
+fn handle_session_restart<F: SessionHostFactory>(
+    request: &RequestEnvelope,
+    ctx: &mut RuntimeContext<'_, F>,
+) -> ResponseEnvelope {
+    let session_id = request.payload()["sessionId"].as_str().unwrap_or_default();
+
+    match ctx.sessions.restart(session_id) {
+        Ok(restarted_session_id) => match ctx.sessions.get_status(&restarted_session_id) {
+            Ok(snapshot) => ResponseEnvelope::success(
+                request.id(),
+                serde_json::json!({
+                    "sessionId": restarted_session_id,
+                    "workspaceId": snapshot.workspace_id,
+                    "paneId": snapshot.pane_id,
+                }),
+            ),
+            Err(error) => session_runtime_error_response(request.id(), error),
+        },
+        Err(error) => session_runtime_error_response(request.id(), error),
+    }
+}
+
+fn handle_session_get_status<F: SessionHostFactory>(
+    request: &RequestEnvelope,
+    ctx: &mut RuntimeContext<'_, F>,
+) -> ResponseEnvelope {
+    let session_id = request.payload()["sessionId"].as_str().unwrap_or_default();
+
+    match ctx.sessions.get_status(session_id) {
+        Ok(snapshot) => ResponseEnvelope::success(
+            request.id(),
+            serde_json::json!({
+                "sessionId": snapshot.session_id,
+                "workspaceId": snapshot.workspace_id,
+                "paneId": snapshot.pane_id,
+                "command": snapshot.command,
+                "status": snapshot.status,
+                "exitCode": snapshot.exit_code,
+                "output": snapshot.output,
+            }),
+        ),
+        Err(error) => session_runtime_error_response(request.id(), error),
+    }
+}
+
+// ── Workspace / pane / notify dispatch handlers ──────────────────────────
+
 fn handle_workspace_create(
     request: &RequestEnvelope,
     registry: &mut WorkspaceRegistry,
@@ -1984,5 +2150,319 @@ mod handler_tests {
         assert!(!resp.is_ok());
         assert_eq!(resp.error().unwrap().code, ErrorCode::InvalidPayload);
         assert!(reg.list().is_empty());
+    }
+
+    // ── dispatch_runtime tests ──────────────────────────────────────────
+
+    // Minimal mock for testing session dispatch without real PTY processes.
+    mod fake_session {
+        use core_session::{OutputBuffer, SessionHost, SessionHostFactory, SessionSpec, TerminalSize};
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Default)]
+        pub struct FakeState {
+            pub writes: Vec<Vec<u8>>,
+            pub resizes: Vec<TerminalSize>,
+            pub next_wait: Option<bool>,
+            pub outputs: Vec<Arc<Mutex<OutputBuffer>>>,
+        }
+
+        #[derive(Clone, Default)]
+        pub struct FakeFactory {
+            pub state: Arc<Mutex<FakeState>>,
+        }
+
+        struct FakeHost {
+            state: Arc<Mutex<FakeState>>,
+            output: Arc<Mutex<OutputBuffer>>,
+        }
+
+        impl SessionHost for FakeHost {
+            fn write_input(&mut self, data: &[u8]) -> Result<(), String> {
+                self.state.lock().unwrap().writes.push(data.to_vec());
+                self.output.lock().unwrap().bytes.extend_from_slice(data);
+                Ok(())
+            }
+
+            fn resize(&self, size: TerminalSize) -> Result<(), String> {
+                self.state.lock().unwrap().resizes.push(size);
+                Ok(())
+            }
+
+            fn try_wait(&mut self) -> Result<Option<bool>, String> {
+                Ok(self.state.lock().unwrap().next_wait)
+            }
+
+            fn collected_output(&self) -> OutputBuffer {
+                let guard = self.output.lock().unwrap();
+                OutputBuffer {
+                    bytes: guard.bytes.clone(),
+                    dropped_prefix_bytes: guard.dropped_prefix_bytes,
+                }
+            }
+        }
+
+        impl SessionHostFactory for FakeFactory {
+            fn spawn(
+                &self,
+                _spec: &SessionSpec,
+                _size: TerminalSize,
+            ) -> Result<Box<dyn SessionHost>, String> {
+                let output = Arc::new(Mutex::new(OutputBuffer::default()));
+                let mut state = self.state.lock().unwrap();
+                state.outputs.push(Arc::clone(&output));
+                Ok(Box::new(FakeHost {
+                    state: Arc::clone(&self.state),
+                    output,
+                }))
+            }
+        }
+    }
+
+    use fake_session::FakeFactory;
+    use core_session::{LiveSessionRegistry, SessionSpec, TerminalSize};
+
+    fn make_runtime_ctx<'a>(
+        registry: &'a mut WorkspaceRegistry,
+        sessions: &'a mut LiveSessionRegistry<FakeFactory>,
+    ) -> RuntimeContext<'a, FakeFactory> {
+        RuntimeContext { registry, sessions }
+    }
+
+    /// Helper: start a session bound to workspace_id + pane_id, return its ID.
+    fn start_test_session(
+        sessions: &mut LiveSessionRegistry<FakeFactory>,
+        workspace_id: &str,
+        pane_id: &str,
+    ) -> String {
+        sessions
+            .start(
+                workspace_id,
+                pane_id,
+                SessionSpec::new(format!("{workspace_id}:{pane_id}"), "cmd.exe"),
+                TerminalSize { rows: 24, cols: 80 },
+            )
+            .expect("session should start")
+    }
+
+    #[test]
+    fn dispatch_runtime_routes_workspace_commands_through_existing_dispatch() {
+        let mut reg = WorkspaceRegistry::new();
+        let factory = FakeFactory::default();
+        let mut sessions = LiveSessionRegistry::new(factory);
+        let mut ctx = make_runtime_ctx(&mut reg, &mut sessions);
+
+        let request = RequestEnvelope::new(
+            "rt-ws-1",
+            "workspace.create",
+            json!({
+                "name": "test-ws",
+                "rootDir": "/tmp/test",
+                "shellProfile": "bash"
+            }),
+        );
+
+        let response = dispatch_runtime(&request, &mut ctx);
+
+        assert!(response.is_ok());
+        let result = response.result().unwrap();
+        assert!(result["workspaceId"].as_str().unwrap().starts_with("ws-"));
+        assert_eq!(ctx.registry.list().len(), 1);
+    }
+
+    #[test]
+    fn dispatch_runtime_handles_session_send_input() {
+        let mut reg = WorkspaceRegistry::new();
+        let factory = FakeFactory::default();
+        let mut sessions = LiveSessionRegistry::new(factory.clone());
+
+        // Create a workspace and pane first so the session can bind.
+        reg.create("ws-test", "test", "/tmp", "bash", WorkspaceLayout::starter())
+            .unwrap();
+
+        let session_id = start_test_session(&mut sessions, "ws-test", "pane-1");
+
+        let mut ctx = make_runtime_ctx(&mut reg, &mut sessions);
+        let request = RequestEnvelope::new(
+            "rt-input-1",
+            "session.sendInput",
+            json!({
+                "sessionId": session_id,
+                "data": "ls -la\n"
+            }),
+        );
+
+        let response = dispatch_runtime(&request, &mut ctx);
+
+        assert!(response.is_ok());
+        let result = response.result().unwrap();
+        assert_eq!(result["delivered"], true);
+        assert_eq!(result["sessionId"], session_id);
+
+        // Verify the input was actually written.
+        let state = factory.state.lock().unwrap();
+        assert_eq!(state.writes, vec![b"ls -la\n".to_vec()]);
+    }
+
+    #[test]
+    fn dispatch_runtime_handles_session_resize() {
+        let mut reg = WorkspaceRegistry::new();
+        let factory = FakeFactory::default();
+        let mut sessions = LiveSessionRegistry::new(factory.clone());
+
+        reg.create("ws-rsz", "resize-ws", "/tmp", "bash", WorkspaceLayout::starter())
+            .unwrap();
+
+        let session_id = start_test_session(&mut sessions, "ws-rsz", "pane-1");
+
+        let mut ctx = make_runtime_ctx(&mut reg, &mut sessions);
+        let request = RequestEnvelope::new(
+            "rt-resize-1",
+            "session.resize",
+            json!({
+                "sessionId": session_id,
+                "cols": 120,
+                "rows": 40
+            }),
+        );
+
+        let response = dispatch_runtime(&request, &mut ctx);
+
+        assert!(response.is_ok());
+        let result = response.result().unwrap();
+        assert_eq!(result["resized"], true);
+        assert_eq!(result["sessionId"], session_id);
+
+        // Verify the resize was actually applied.
+        let state = factory.state.lock().unwrap();
+        assert_eq!(state.resizes, vec![TerminalSize { rows: 40, cols: 120 }]);
+    }
+
+    #[test]
+    fn dispatch_runtime_handles_session_restart() {
+        let mut reg = WorkspaceRegistry::new();
+        let factory = FakeFactory::default();
+        let mut sessions = LiveSessionRegistry::new(factory.clone());
+
+        reg.create("ws-restart", "restart-ws", "/tmp", "bash", WorkspaceLayout::starter())
+            .unwrap();
+
+        let session_id = start_test_session(&mut sessions, "ws-restart", "pane-1");
+
+        // Mark the session as exited so restart is allowed.
+        factory.state.lock().unwrap().next_wait = Some(true);
+        // Trigger exit detection via get_status.
+        let _ = sessions.get_status(&session_id);
+
+        let mut ctx = make_runtime_ctx(&mut reg, &mut sessions);
+        let request = RequestEnvelope::new(
+            "rt-restart-1",
+            "session.restart",
+            json!({ "sessionId": session_id }),
+        );
+
+        let response = dispatch_runtime(&request, &mut ctx);
+
+        assert!(response.is_ok());
+        let result = response.result().unwrap();
+        // After restart, a new session ID is returned.
+        assert!(result["sessionId"].as_str().unwrap().starts_with("session:"));
+        assert_eq!(result["workspaceId"], "ws-restart");
+        assert_eq!(result["paneId"], "pane-1");
+    }
+
+    #[test]
+    fn dispatch_runtime_handles_session_get_status() {
+        let mut reg = WorkspaceRegistry::new();
+        let factory = FakeFactory::default();
+        let mut sessions = LiveSessionRegistry::new(factory);
+
+        reg.create("ws-status", "status-ws", "/tmp", "bash", WorkspaceLayout::starter())
+            .unwrap();
+
+        let session_id = start_test_session(&mut sessions, "ws-status", "pane-1");
+
+        let mut ctx = make_runtime_ctx(&mut reg, &mut sessions);
+        let request = RequestEnvelope::new(
+            "rt-status-1",
+            "session.getStatus",
+            json!({ "sessionId": session_id }),
+        );
+
+        let response = dispatch_runtime(&request, &mut ctx);
+
+        assert!(response.is_ok());
+        let result = response.result().unwrap();
+        assert_eq!(result["sessionId"], session_id);
+        assert_eq!(result["workspaceId"], "ws-status");
+        assert_eq!(result["paneId"], "pane-1");
+        assert_eq!(result["status"], "running");
+        assert!(result["command"].as_str().unwrap().contains("cmd.exe"));
+    }
+
+    #[test]
+    fn dispatch_runtime_rejects_unknown_commands() {
+        let mut reg = WorkspaceRegistry::new();
+        let factory = FakeFactory::default();
+        let mut sessions = LiveSessionRegistry::new(factory);
+        let mut ctx = make_runtime_ctx(&mut reg, &mut sessions);
+
+        let request = RequestEnvelope::new(
+            "rt-unknown-1",
+            "bogus.command",
+            json!({}),
+        );
+
+        let response = dispatch_runtime(&request, &mut ctx);
+
+        assert!(!response.is_ok());
+        let err = response.error().unwrap();
+        assert_eq!(err.code, ErrorCode::Unsupported);
+        assert!(err.message.contains("bogus.command"));
+    }
+
+    #[test]
+    fn dispatch_runtime_session_send_input_returns_not_found_for_missing_session() {
+        let mut reg = WorkspaceRegistry::new();
+        let factory = FakeFactory::default();
+        let mut sessions = LiveSessionRegistry::new(factory);
+        let mut ctx = make_runtime_ctx(&mut reg, &mut sessions);
+
+        let request = RequestEnvelope::new(
+            "rt-miss-1",
+            "session.sendInput",
+            json!({
+                "sessionId": "session:9999",
+                "data": "hello"
+            }),
+        );
+
+        let response = dispatch_runtime(&request, &mut ctx);
+
+        assert!(!response.is_ok());
+        assert_eq!(response.error().unwrap().code, ErrorCode::NotFound);
+    }
+
+    #[test]
+    fn dispatch_runtime_raw_routes_session_commands() {
+        let mut reg = WorkspaceRegistry::new();
+        let factory = FakeFactory::default();
+        let mut sessions = LiveSessionRegistry::new(factory);
+
+        reg.create("ws-raw", "raw-ws", "/tmp", "bash", WorkspaceLayout::starter())
+            .unwrap();
+        let session_id = start_test_session(&mut sessions, "ws-raw", "pane-1");
+
+        let mut ctx = make_runtime_ctx(&mut reg, &mut sessions);
+        let input = format!(
+            r#"{{"protocolVersion":1,"id":"raw-rt-1","type":"command","command":"session.getStatus","payload":{{"sessionId":"{}"}}}}"#,
+            session_id
+        );
+
+        let out = dispatch_runtime_raw(&input, &mut ctx);
+        let v: Value = serde_json::from_str(&out).expect("output should be valid JSON");
+        assert_eq!(v["ok"], true);
+        assert_eq!(v["id"], "raw-rt-1");
+        assert_eq!(v["result"]["sessionId"], session_id);
     }
 }
