@@ -101,6 +101,7 @@ describe("useDesktopState", () => {
             paneId: string;
             sessionId: string;
             chunk: string;
+            resetTerminal: boolean;
           };
         }) => void)
       | undefined;
@@ -140,6 +141,7 @@ describe("useDesktopState", () => {
           paneId: "pane-1",
           sessionId: "session:1",
           chunk: "\r\nworld",
+          resetTerminal: false,
         },
       });
     });
@@ -155,6 +157,7 @@ describe("useDesktopState", () => {
             paneId: string;
             sessionId: string;
             chunk: string;
+            resetTerminal: boolean;
           };
         }) => void)
       | undefined;
@@ -194,11 +197,69 @@ describe("useDesktopState", () => {
           paneId: "pane-1",
           sessionId: "session:1",
           chunk: "\r\nstale",
+          resetTerminal: false,
         },
       });
     });
 
     expect(screen.getByTestId("state").textContent).toContain("\"output\":\"fresh\"");
     expect(screen.getByTestId("state").textContent).not.toContain("stale");
+  });
+
+  it("replaces pane output when session.output requests a terminal reset", async () => {
+    let eventHandler:
+      | ((event: {
+          payload: {
+            workspaceId: string;
+            paneId: string;
+            sessionId: string;
+            chunk: string;
+            resetTerminal: boolean;
+          };
+        }) => void)
+      | undefined;
+
+    vi.mocked(invoke).mockResolvedValue({
+      protocolVersion: 1,
+      workspaces: [
+        {
+          id: "ws-inbox",
+          name: "inbox",
+          rootDir: "D:\\dev\\inbox",
+          shellProfile: "cmd.exe",
+          focusedPaneId: "pane-1",
+          panes: [
+            {
+              paneId: "pane-1",
+              sessionId: "session:1",
+              status: "running",
+              output: "old-output",
+            },
+          ],
+        },
+      ],
+    });
+    vi.mocked(listen).mockImplementation(async (_eventName, handler) => {
+      eventHandler = handler as typeof eventHandler;
+      return vi.fn();
+    });
+
+    render(<HookProbe />);
+    await flushMicrotasks();
+
+    await act(async () => {
+      eventHandler?.({
+        payload: {
+          workspaceId: "ws-inbox",
+          paneId: "pane-1",
+          sessionId: "session:1",
+          chunk: "replacement",
+          resetTerminal: true,
+        },
+      });
+    });
+
+    expect(screen.getByTestId("state").textContent).toContain("\"output\":\"replacement\"");
+    expect(screen.getByTestId("state").textContent).not.toContain("old-output");
   });
 });

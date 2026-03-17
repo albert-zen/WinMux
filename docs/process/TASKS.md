@@ -131,7 +131,7 @@ Deliverables:
 
 Current status:
 
-- workspace create, pane split, session commands, and notify flow already round-trip over named pipe
+- workspace create/close/rename, pane split, session commands, and notify flow already round-trip over named pipe
 - workspace list/switch and fuller pane-management parity remain
 
 Suggested tests:
@@ -160,7 +160,9 @@ Current status:
 
 - xterm.js pane surface is live
 - desktop split-pane layout, focus, close, resize, and restart are already wired
-- desktop workspace management and final persisted layout semantics remain
+- desktop workspace management is largely in place
+- local registry persistence/restore and output retention caps are now in place
+- final persisted layout semantics and richer restore behavior remain
 
 Suggested tests:
 

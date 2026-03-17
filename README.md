@@ -89,13 +89,16 @@ What already works today:
 - named-pipe transport between desktop backend and CLI
 - xterm.js terminal panes in the desktop app
 - split, focus, close, resize, and restart flows for panes
+- workspace create, switch, close, and rename flows in desktop UI and CLI
 - streamed terminal output plus snapshot polling fallback
+- local workspace persistence and startup restore for the current registry/layout model
+- capped retained PTY/session output to reduce long-running memory growth
+- reset-aware streamed output handling when capped history forces a terminal resync
 
 What is still incomplete:
 
-- desktop workspace create/list/switch flow
 - authoritative persisted split-tree layout model
-- restore and reopen behavior
+- richer restore and reopen behavior
 - broader hardening for long-running daily use
 
 ## Quick Start

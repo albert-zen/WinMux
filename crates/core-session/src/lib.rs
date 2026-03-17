@@ -1,6 +1,10 @@
 // core-session: session domain model plus a small live-session runtime.
 
-use core_pty::{PtyError, PtyHost, PtySize};
+pub use core_pty::OutputBuffer;
+use core_pty::{DEFAULT_OUTPUT_CAP, PtyError, PtyHost, PtySize};
+
+/// Maximum retained output bytes per session.
+pub const SESSION_OUTPUT_CAP_BYTES: usize = DEFAULT_OUTPUT_CAP;
 use std::collections::HashMap;
 use std::fmt;
 
@@ -214,6 +218,7 @@ pub struct SessionOutputEvent {
     pub workspace_id: String,
     pub pane_id: String,
     pub chunk: String,
+    pub reset_terminal: bool,
     cursor_start: usize,
 }
 
@@ -244,7 +249,7 @@ pub trait SessionHost: Send {
     fn write_input(&mut self, data: &[u8]) -> Result<(), String>;
     fn resize(&self, size: TerminalSize) -> Result<(), String>;
     fn try_wait(&mut self) -> Result<Option<bool>, String>;
-    fn collected_output(&self) -> Vec<u8>;
+    fn collected_output(&self) -> OutputBuffer;
 }
 
 pub trait SessionHostFactory {
@@ -441,6 +446,13 @@ where
             _ => (session.record.status.label().to_string(), None),
         };
 
+        let raw_output = session.host.collected_output();
+        let capped = if raw_output.bytes.len() > SESSION_OUTPUT_CAP_BYTES {
+            &raw_output.bytes[raw_output.bytes.len() - SESSION_OUTPUT_CAP_BYTES..]
+        } else {
+            &raw_output.bytes
+        };
+
         Ok(SessionSnapshot {
             session_id: session.record.id.to_string(),
             workspace_id: session.workspace_id.clone(),
@@ -448,7 +460,7 @@ where
             command: session.record.spec.command.clone(),
             status,
             exit_code,
-            output: String::from_utf8_lossy(&session.host.collected_output()).into_owned(),
+            output: String::from_utf8_lossy(capped).into_owned(),
         })
     }
 
@@ -499,18 +511,31 @@ where
 
             Self::refresh_exit_state(session)?;
             let output = session.host.collected_output();
-            if output.len() < session.emitted_output_bytes {
-                cursor_updates.push((session_id, output.len()));
+            let logical_len = output.dropped_prefix_bytes + output.bytes.len();
+
+            if logical_len < session.emitted_output_bytes {
+                // Host shrank in an unexpected way; reset cursor.
+                cursor_updates.push((session_id, logical_len));
                 continue;
             }
 
-            if output.len() == session.emitted_output_bytes {
+            if logical_len == session.emitted_output_bytes {
                 continue;
             }
+
+            // How far into output.bytes does the new data start?
+            let new_start = if session.emitted_output_bytes >= output.dropped_prefix_bytes {
+                session.emitted_output_bytes - output.dropped_prefix_bytes
+            } else {
+                // Some already-emitted bytes were dropped; start from the beginning
+                // of retained bytes (they are after the drop boundary).
+                0
+            };
+            let reset_terminal = session.emitted_output_bytes < output.dropped_prefix_bytes;
 
             let chunk =
-                String::from_utf8_lossy(&output[session.emitted_output_bytes..]).into_owned();
-            cursor_updates.push((session_id.clone(), output.len()));
+                String::from_utf8_lossy(&output.bytes[new_start..]).into_owned();
+            cursor_updates.push((session_id.clone(), logical_len));
 
             if chunk.is_empty() {
                 continue;
@@ -521,6 +546,7 @@ where
                 workspace_id: session.workspace_id.clone(),
                 pane_id: session.pane_id.clone(),
                 chunk,
+                reset_terminal,
                 cursor_start: session.emitted_output_bytes,
             });
         }
@@ -617,8 +643,11 @@ impl SessionHost for PtySessionHost {
         self.host.try_wait().map_err(|err| err.to_string())
     }
 
-    fn collected_output(&self) -> Vec<u8> {
-        self.host.collected_output()
+    fn collected_output(&self) -> OutputBuffer {
+        OutputBuffer {
+            bytes: self.host.collected_output(),
+            dropped_prefix_bytes: self.host.dropped_prefix_bytes(),
+        }
     }
 }
 
@@ -660,7 +689,7 @@ mod tests {
         spawn_commands: Vec<String>,
         writes: Vec<Vec<u8>>,
         resizes: Vec<TerminalSize>,
-        outputs: Vec<Arc<Mutex<Vec<u8>>>>,
+        outputs: Vec<Arc<Mutex<OutputBuffer>>>,
         next_wait: Option<bool>,
     }
 
@@ -671,13 +700,13 @@ mod tests {
 
     struct FakeHost {
         state: Arc<Mutex<FakeFactoryState>>,
-        output: Arc<Mutex<Vec<u8>>>,
+        output: Arc<Mutex<OutputBuffer>>,
     }
 
     impl SessionHost for FakeHost {
         fn write_input(&mut self, data: &[u8]) -> Result<(), String> {
             self.state.lock().unwrap().writes.push(data.to_vec());
-            self.output.lock().unwrap().extend_from_slice(data);
+            self.output.lock().unwrap().bytes.extend_from_slice(data);
             Ok(())
         }
 
@@ -690,8 +719,12 @@ mod tests {
             Ok(self.state.lock().unwrap().next_wait)
         }
 
-        fn collected_output(&self) -> Vec<u8> {
-            self.output.lock().unwrap().clone()
+        fn collected_output(&self) -> OutputBuffer {
+            let guard = self.output.lock().unwrap();
+            OutputBuffer {
+                bytes: guard.bytes.clone(),
+                dropped_prefix_bytes: guard.dropped_prefix_bytes,
+            }
         }
     }
 
@@ -701,7 +734,7 @@ mod tests {
             spec: &SessionSpec,
             _size: TerminalSize,
         ) -> Result<Box<dyn SessionHost>, String> {
-            let output = Arc::new(Mutex::new(Vec::new()));
+            let output = Arc::new(Mutex::new(OutputBuffer::default()));
             let mut state = self.state.lock().unwrap();
             state.outputs.push(Arc::clone(&output));
             state.spawn_commands.push(spec.command.clone());
@@ -1106,6 +1139,7 @@ mod tests {
                 workspace_id: "ws-1".to_string(),
                 pane_id: "pane-1".to_string(),
                 chunk: "echo one\r\n".to_string(),
+                reset_terminal: false,
                 cursor_start: 0,
             }]
         );
@@ -1172,7 +1206,7 @@ mod tests {
 
         {
             let output = factory.state.lock().unwrap().outputs[0].clone();
-            output.lock().unwrap().clear();
+            output.lock().unwrap().bytes.clear();
         }
 
         assert!(registry.drain_output_events().unwrap().is_empty());
@@ -1214,6 +1248,128 @@ mod tests {
         assert_eq!(replayed.len(), 1);
         assert_eq!(replayed[0].session_id, second_session);
         assert_eq!(replayed[0].chunk, "second\r\n");
+    }
+
+    #[test]
+    fn live_registry_get_status_returns_only_capped_recent_output() {
+        let factory = FakeFactory::default();
+        let mut registry = LiveSessionRegistry::new(factory.clone());
+        let session_id = registry
+            .start(
+                "ws-1",
+                "pane-1",
+                SessionSpec::new("shell", "pwsh"),
+                TerminalSize { rows: 24, cols: 80 },
+            )
+            .unwrap();
+
+        {
+            let output = factory.state.lock().unwrap().outputs[0].clone();
+            let mut output = output.lock().unwrap();
+            output.bytes = vec![b'a'; SESSION_OUTPUT_CAP_BYTES - 4];
+            output.bytes.extend_from_slice(b"tail");
+        }
+
+        let snapshot = registry.get_status(&session_id).unwrap();
+
+        assert_eq!(snapshot.output.len(), SESSION_OUTPUT_CAP_BYTES);
+        assert!(snapshot.output.ends_with("tail"));
+    }
+
+    #[test]
+    fn live_registry_drain_output_events_preserves_new_bytes_after_prefix_trim() {
+        let factory = FakeFactory::default();
+        let mut registry = LiveSessionRegistry::new(factory.clone());
+        let session_id = registry
+            .start(
+                "ws-1",
+                "pane-1",
+                SessionSpec::new("shell", "pwsh"),
+                TerminalSize { rows: 24, cols: 80 },
+            )
+            .unwrap();
+
+        registry.send_input(&session_id, b"abcdef").unwrap();
+        let first = registry.drain_output_events().unwrap();
+        assert_eq!(first[0].chunk, "abcdef");
+
+        {
+            let output = factory.state.lock().unwrap().outputs[0].clone();
+            let mut output = output.lock().unwrap();
+            output.bytes.drain(0..4);
+            output.dropped_prefix_bytes += 4;
+            output.bytes.extend_from_slice(b"ghij");
+        }
+
+        let second = registry.drain_output_events().unwrap();
+
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].chunk, "ghij");
+        assert!(!second[0].reset_terminal);
+    }
+
+    #[test]
+    fn live_registry_drain_output_events_requests_terminal_reset_after_gap() {
+        let factory = FakeFactory::default();
+        let mut registry = LiveSessionRegistry::new(factory.clone());
+        let _session_id = registry
+            .start(
+                "ws-1",
+                "pane-1",
+                SessionSpec::new("shell", "pwsh"),
+                TerminalSize { rows: 24, cols: 80 },
+            )
+            .unwrap();
+
+        {
+            let output = factory.state.lock().unwrap().outputs[0].clone();
+            let mut output = output.lock().unwrap();
+            output.bytes.extend_from_slice(b"abcdefghij");
+            output.dropped_prefix_bytes = 6;
+        }
+
+        let events = registry.drain_output_events().unwrap();
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].chunk, "abcdefghij");
+        assert!(events[0].reset_terminal);
+    }
+
+    #[test]
+    fn live_registry_drain_output_events_can_request_multiple_terminal_resets() {
+        let factory = FakeFactory::default();
+        let mut registry = LiveSessionRegistry::new(factory.clone());
+        let _session_id = registry
+            .start(
+                "ws-1",
+                "pane-1",
+                SessionSpec::new("shell", "pwsh"),
+                TerminalSize { rows: 24, cols: 80 },
+            )
+            .unwrap();
+
+        {
+            let output = factory.state.lock().unwrap().outputs[0].clone();
+            let mut output = output.lock().unwrap();
+            output.bytes.extend_from_slice(b"first-reset");
+            output.dropped_prefix_bytes = 4;
+        }
+        let first = registry.drain_output_events().unwrap();
+        assert_eq!(first.len(), 1);
+        assert!(first[0].reset_terminal);
+
+        {
+            let output = factory.state.lock().unwrap().outputs[0].clone();
+            let mut output = output.lock().unwrap();
+            output.bytes.clear();
+            output.bytes.extend_from_slice(b"second-reset");
+            output.dropped_prefix_bytes = 32;
+        }
+        let second = registry.drain_output_events().unwrap();
+
+        assert_eq!(second.len(), 1);
+        assert!(second[0].reset_terminal);
+        assert_eq!(second[0].chunk, "second-reset");
     }
 
     #[test]

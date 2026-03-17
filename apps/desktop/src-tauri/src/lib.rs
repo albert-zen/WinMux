@@ -67,6 +67,7 @@ struct SessionOutputPayload {
     pane_id: String,
     session_id: String,
     chunk: String,
+    reset_terminal: bool,
 }
 
 impl<F> RuntimeState<F>
@@ -232,6 +233,7 @@ where
                 pane_id: event.pane_id,
                 session_id: event.session_id,
                 chunk: event.chunk,
+                reset_terminal: event.reset_terminal,
             })
             .collect())
     }
@@ -1039,6 +1041,7 @@ where
             pane_id: event.pane_id.clone(),
             session_id: event.session_id.clone(),
             chunk: event.chunk.clone(),
+            reset_terminal: event.reset_terminal,
         };
 
         if let Err(error) = emit(SESSION_OUTPUT_EVENT_NAME, &payload) {
@@ -1200,7 +1203,7 @@ pub fn run() {
 mod tests {
     use super::*;
     use core_ipc::ResponseExt;
-    use core_session::SessionHost;
+    use core_session::{OutputBuffer, SessionHost};
     use std::fs;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
@@ -1210,7 +1213,7 @@ mod tests {
     struct FakeFactoryState {
         spawn_commands: Vec<String>,
         writes: Vec<Vec<u8>>,
-        outputs: Vec<Arc<Mutex<Vec<u8>>>>,
+        outputs: Vec<Arc<Mutex<OutputBuffer>>>,
         exited: bool,
         fail_next_spawn: bool,
     }
@@ -1222,14 +1225,14 @@ mod tests {
 
     struct FakeHost {
         state: Arc<Mutex<FakeFactoryState>>,
-        output: Arc<Mutex<Vec<u8>>>,
+        output: Arc<Mutex<OutputBuffer>>,
     }
 
     impl SessionHost for FakeHost {
         fn write_input(&mut self, data: &[u8]) -> Result<(), String> {
             let mut state = self.state.lock().unwrap();
             state.writes.push(data.to_vec());
-            self.output.lock().unwrap().extend_from_slice(data);
+            self.output.lock().unwrap().bytes.extend_from_slice(data);
             if data.windows(4).any(|window| window == b"exit") {
                 state.exited = true;
             }
@@ -1245,7 +1248,7 @@ mod tests {
             Ok(exited.then_some(true))
         }
 
-        fn collected_output(&self) -> Vec<u8> {
+        fn collected_output(&self) -> OutputBuffer {
             self.output.lock().unwrap().clone()
         }
     }
@@ -1256,7 +1259,7 @@ mod tests {
             spec: &SessionSpec,
             _size: TerminalSize,
         ) -> Result<Box<dyn SessionHost>, String> {
-            let output = Arc::new(Mutex::new(Vec::new()));
+            let output = Arc::new(Mutex::new(OutputBuffer::default()));
             let mut state = self.state.lock().unwrap();
             if state.fail_next_spawn {
                 state.fail_next_spawn = false;
@@ -1941,6 +1944,7 @@ mod tests {
                 pane_id: "pane-1".to_string(),
                 session_id: "session:1".to_string(),
                 chunk: "echo stream\r\n".to_string(),
+                reset_terminal: false,
             }]
         );
         assert!(runtime.drain_output_events().unwrap().is_empty());
@@ -1988,6 +1992,7 @@ mod tests {
         assert_eq!(emitted.len(), 1);
         assert_eq!(emitted[0].0, SESSION_OUTPUT_EVENT_NAME);
         assert_eq!(emitted[0].1.chunk, "echo emit\r\n");
+        assert!(!emitted[0].1.reset_terminal);
     }
 
     #[test]

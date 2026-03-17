@@ -71,6 +71,7 @@ export type SessionOutputEvent = {
   paneId: string;
   sessionId: string;
   chunk: string;
+  resetTerminal: boolean;
 };
 
 export function createStarterWorkspaceSnapshot(): WorkspaceSnapshot {

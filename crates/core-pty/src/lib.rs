@@ -8,6 +8,49 @@ use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+// ── Output buffer ─────────────────────────────────────────────────────────────
+
+/// Capped ring-tail buffer for PTY output.
+///
+/// Retains at most the most recent `cap` bytes written via
+/// [`append_capped_output`].  Bytes evicted from the front are counted in
+/// `dropped_prefix_bytes` so callers can reconstruct a logical byte offset.
+#[derive(Debug, Clone, Default)]
+pub struct OutputBuffer {
+    /// Retained tail bytes (at most `cap` bytes, newest data at the end).
+    pub bytes: Vec<u8>,
+    /// Total bytes that have been discarded from the logical prefix.
+    pub dropped_prefix_bytes: usize,
+}
+
+/// Append `data` to `buf`, capping the retained tail to `cap` bytes.
+///
+/// Any bytes evicted from the front are added to
+/// [`OutputBuffer::dropped_prefix_bytes`].
+pub fn append_capped_output(buf: &mut OutputBuffer, data: &[u8], cap: usize) {
+    let combined_len = buf.bytes.len() + data.len();
+    if combined_len <= cap {
+        buf.bytes.extend_from_slice(data);
+        return;
+    }
+
+    let total_drop = combined_len - cap;
+    buf.dropped_prefix_bytes += total_drop;
+
+    if data.len() >= cap {
+        // New chunk alone fills or exceeds the cap — take only its tail.
+        buf.bytes = data[data.len() - cap..].to_vec();
+    } else {
+        // Evict the front of the existing buffer, then append new data.
+        let drop_from_buf = buf.bytes.len() - (cap - data.len());
+        buf.bytes.drain(..drop_from_buf);
+        buf.bytes.extend_from_slice(data);
+    }
+}
+
+/// Default cap for the PTY output buffer: 1 MiB.
+pub const DEFAULT_OUTPUT_CAP: usize = 1 * 1024 * 1024;
+
 // ── Public types ─────────────────────────────────────────────────────────────
 
 /// Terminal window dimensions.
@@ -50,7 +93,7 @@ pub struct PtyHost {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
-    output: Arc<Mutex<Vec<u8>>>,
+    output: Arc<Mutex<OutputBuffer>>,
 }
 
 impl PtyHost {
@@ -106,8 +149,8 @@ impl PtyHost {
             .try_clone_reader()
             .map_err(|e| PtyError::Spawn(e.to_string()))?;
 
-        // Background thread: drain PTY bytes into a shared buffer.
-        let output: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+        // Background thread: drain PTY bytes into a shared capped buffer.
+        let output: Arc<Mutex<OutputBuffer>> = Arc::new(Mutex::new(OutputBuffer::default()));
         let output_bg = Arc::clone(&output);
 
         thread::spawn(move || {
@@ -116,7 +159,11 @@ impl PtyHost {
                 match reader.read(&mut buf) {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
-                        output_bg.lock().unwrap().extend_from_slice(&buf[..n]);
+                        append_capped_output(
+                            &mut output_bg.lock().unwrap(),
+                            &buf[..n],
+                            DEFAULT_OUTPUT_CAP,
+                        );
                     }
                 }
             }
@@ -160,9 +207,14 @@ impl PtyHost {
             .map_err(|e| PtyError::Io(e.to_string()))
     }
 
-    /// Returns a snapshot of all bytes collected from the PTY so far.
+    /// Returns a snapshot of the retained PTY output bytes (tail of all output).
     pub fn collected_output(&self) -> Vec<u8> {
-        self.output.lock().unwrap().clone()
+        self.output.lock().unwrap().bytes.clone()
+    }
+
+    /// Returns the number of bytes dropped from the logical prefix of PTY output.
+    pub fn dropped_prefix_bytes(&self) -> usize {
+        self.output.lock().unwrap().dropped_prefix_bytes
     }
 }
 
@@ -267,5 +319,30 @@ mod tests {
             assert!(Instant::now() < deadline, "shell did not exit after 'exit'");
             thread::sleep(Duration::from_millis(50));
         }
+    }
+
+    #[test]
+    fn append_capped_output_keeps_recent_tail_and_tracks_dropped_prefix() {
+        let mut output = OutputBuffer::default();
+
+        append_capped_output(&mut output, b"abcdef", 4);
+
+        assert_eq!(output.bytes, b"cdef");
+        assert_eq!(output.dropped_prefix_bytes, 2);
+
+        append_capped_output(&mut output, b"gh", 4);
+
+        assert_eq!(output.bytes, b"efgh");
+        assert_eq!(output.dropped_prefix_bytes, 4);
+    }
+
+    #[test]
+    fn append_capped_output_accepts_single_chunk_larger_than_cap() {
+        let mut output = OutputBuffer::default();
+
+        append_capped_output(&mut output, b"abcdefgh", 4);
+
+        assert_eq!(output.bytes, b"efgh");
+        assert_eq!(output.dropped_prefix_bytes, 4);
     }
 }

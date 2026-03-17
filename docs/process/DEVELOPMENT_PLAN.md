@@ -29,14 +29,19 @@ As of the latest integration work, the project already has:
   - resize panes through a draggable split layout
   - preserve split ratios across pane split/close/rerender
   - restart exited sessions
+  - create, close, rename, and switch workspaces from the desktop shell
 - `session.output` event streaming from desktop backend to frontend hook
 - polling fallback through `desktop_state`
+- local persistence of workspace registry state to `state.json`
+- startup restore of workspace names, shell profiles, root directories, pane lists, and focused pane ids
+- capped PTY/session output retention so long-running sessions do not grow unbounded in memory
+- reset-aware output events so the terminal surface can recover cleanly after capped-prefix truncation
 
 What this means in practice:
 
 - the backend path is real
 - the app is now a working multi-pane terminal demo
-- the remaining gaps are workspace management, true layout persistence, restore behavior, and hardening
+- the remaining gaps are authoritative layout persistence, richer restore semantics, and hardening
 
 ## Definition Of "Usable"
 
@@ -50,7 +55,7 @@ For the next milestone, "usable" means:
 
 This does not yet require:
 
-- full restore on app relaunch
+- perfect restore of every UI detail on app relaunch
 - theme import breadth
 - updater and packaging polish
 - advanced sidebar metadata
@@ -119,7 +124,7 @@ Required tests:
 
 ### Slice 3: Workspace And Pane Management Loop
 
-Status: in progress
+Status: mostly completed
 
 Why this is next:
 
@@ -129,6 +134,7 @@ Why this is next:
 Scope:
 
 - Add workspace create/list/switch in the desktop shell.
+- Add workspace rename/close flows in both desktop UI and CLI.
 - Keep pane close and focus actions aligned across desktop and CLI.
 - Expose missing runtime handlers where the protocol already supports them or should now support them.
 - Keep CLI and desktop behavior aligned.
@@ -136,17 +142,21 @@ Scope:
 Exit criteria:
 
 - Multiple workspaces can be created and switched without restarting the app.
+- Workspaces can be renamed and closed without stale desktop state.
 - Panes can be closed safely without breaking focus rules.
 - CLI and desktop both exercise the same runtime behavior.
 
 Required tests:
 
 - workspace switching preserves per-workspace pane state
+- rename flows update desktop/CLI state without waiting for a refresh cycle
 - closing a focused pane falls back to the expected pane
 - closing the final pane is rejected or replaced according to product rules
 - CLI requests round-trip correctly for the new actions
 
 ### Slice 4: Restore And Hardening Pass
+
+Status: in progress
 
 Why this is the next "stability" milestone:
 
@@ -155,10 +165,17 @@ Why this is the next "stability" milestone:
 
 Scope:
 
-- Persist workspace and pane snapshots on shutdown
+- Persist workspace and pane snapshots after successful mutations
 - restore shell launch context on startup
 - improve PTY/session error surfacing
 - add caps or safeguards for output accumulation and long-running sessions
+
+What has landed:
+
+- workspace registry persistence to local `state.json`
+- startup restore with safe fallback on corrupt or unsupported state
+- protocol/version validation for persisted state
+- capped PTY/session output retention with truncation-safe `session.output` event behavior
 
 Exit criteria:
 
@@ -172,6 +189,13 @@ Required tests:
 - partial corruption fallback
 - restore ordering and focused pane restoration
 - output cap behavior under large streamed output
+
+What remains in this slice:
+
+- preserve and restore richer workspace-level UI state
+- harden pane id generation against restored custom pane ids
+- decide whether focused-pane persistence should flush immediately or be batched/debounced
+- add stronger PTY failure surfacing in the desktop shell
 
 ## Parallelization Plan
 
@@ -242,11 +266,11 @@ Required verification before merge:
 
 ## Recommended Next Action
 
-Build the remaining workspace-management loop next:
+Continue the restore/hardening pass next:
 
-- add desktop workspace create/list/switch
-- keep the current split-pane desktop shell as the main workspace surface
-- prove per-workspace pane state survives switching
-- decide whether the next layout step is a backend split tree or a persisted UI-only interim model
+- persist and restore one clear workspace-level selection signal
+- harden pane id generation against restored layouts and custom pane ids
+- add explicit PTY/runtime error surfaces in the desktop shell
+- then return to the larger architectural step: replacing the linear pane list with a backend split tree
 
-That is the shortest path from "working terminal demo" to "actually usable workspace tool."
+That is now the shortest path from "roughly usable" to "trustworthy enough for daily use."

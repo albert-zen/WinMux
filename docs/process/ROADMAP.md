@@ -48,8 +48,9 @@ Exit criteria:
 
 Current progress note:
 
-- panes, focus, resize, split, close, restart, PTY, and desktop terminal rendering are already working
-- desktop workspace switching and the final split-tree model are still the main blockers for finishing this phase
+- panes, focus, resize, split, close, restart, PTY, workspace management, and desktop terminal rendering are already working
+- local registry persistence and startup restore are also in place
+- the final split-tree model and richer restore semantics are still the main blockers for finishing this phase
 
 ### Phase 2: Dogfood
 

@@ -138,11 +138,11 @@ The next practical step is no longer terminal rendering or basic split UI.
 
 The next practical step is:
 
-1. Add desktop workspace create/list/switch flow
+1. Finish the restore/hardening pass around the current model
 2. Decide how split-pane ratios should become authoritative state
 3. Upgrade the backend layout model from linear pane list to a real split tree
-4. Implement restore around that layout model
-5. Harden long-running PTY and resize behavior
+4. Rebuild restore around that layout model
+5. Keep hardening long-running PTY, output, and resize behavior
 
 ## Current Reality Check
 
@@ -154,11 +154,15 @@ At handoff time, the repository already includes:
 - `session.output` event streaming
 - end-to-end pane focus and close
 - a draggable split-pane desktop layout
+- workspace create/switch/close/rename in desktop UI and CLI
+- local workspace registry persistence with startup restore
+- capped retained PTY/session output for long-running sessions
 
 Important caveat:
 
 - the current desktop split layout is still a linear UI model layered over pane identities
 - it is not yet the final persisted split-tree architecture described elsewhere in the docs
+- restore currently covers workspace structure and launch context, not every last UI detail
 
 Do not assume the layout problem is "done" just because the desktop app now has split panes.
 

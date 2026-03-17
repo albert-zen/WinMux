@@ -40,7 +40,7 @@ export function useDesktopState(): UseDesktopStateResult {
       SESSION_OUTPUT_EVENT,
       (event) => {
         if (cancelled) return;
-        const { workspaceId, paneId, sessionId, chunk } = event.payload;
+        const { workspaceId, paneId, sessionId, chunk, resetTerminal } = event.payload;
         setState((prev) => {
           if (!prev) return prev;
           return {
@@ -51,7 +51,7 @@ export function useDesktopState(): UseDesktopStateResult {
                 ...ws,
                 panes: ws.panes.map((pane) => {
                   if (pane.paneId !== paneId || pane.sessionId !== sessionId) return pane;
-                  return { ...pane, output: pane.output + chunk };
+                  return { ...pane, output: resetTerminal ? chunk : pane.output + chunk };
                 }),
               };
             }),
