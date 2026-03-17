@@ -62,10 +62,25 @@ export type WorkspaceState = {
   panes: PaneState[];
 };
 
+export type ActiveThemeState = {
+  id: string;
+  name: string;
+  foreground: string;
+  background: string;
+  cursor: string;
+  selection: string;
+};
+
 export type DesktopState = {
   protocolVersion: number;
   workspaces: WorkspaceState[];
   activeWorkspaceId: string | null;
+  activeTheme: ActiveThemeState;
+};
+
+export type ThemeListResponse = {
+  themes: { id: string; name: string }[];
+  activeThemeId: string;
 };
 
 export type SessionOutputEvent = {

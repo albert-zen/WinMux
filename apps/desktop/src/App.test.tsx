@@ -37,6 +37,10 @@ vi.mock("./components/NotificationCenter", () => ({
   NotificationCenter: vi.fn(() => <div data-testid="notification-center" />),
 }));
 
+vi.mock("./components/ThemeSelector", () => ({
+  ThemeSelector: vi.fn(() => <div data-testid="theme-selector" />),
+}));
+
 describe("App terminal pane", () => {
   beforeEach(() => {
     vi.mocked(paneSplit).mockResolvedValue(undefined);
@@ -47,6 +51,14 @@ describe("App terminal pane", () => {
       state: {
         protocolVersion: 1,
         activeWorkspaceId: null,
+        activeTheme: {
+          id: "dark",
+          name: "Dark",
+          foreground: "#d4d4d4",
+          background: "#1e1e1e",
+          cursor: "#aeafad",
+          selection: "#264f78",
+        },
         workspaces: [
           {
             id: "ws-inbox",
@@ -94,6 +106,14 @@ describe("App terminal pane", () => {
       state: {
         protocolVersion: 1,
         activeWorkspaceId: null,
+        activeTheme: {
+          id: "dark",
+          name: "Dark",
+          foreground: "#d4d4d4",
+          background: "#1e1e1e",
+          cursor: "#aeafad",
+          selection: "#264f78",
+        },
         workspaces: [
           {
             id: "ws-inbox",
@@ -134,6 +154,14 @@ describe("App terminal pane", () => {
       state: {
         protocolVersion: 1,
         activeWorkspaceId: null,
+        activeTheme: {
+          id: "dark",
+          name: "Dark",
+          foreground: "#d4d4d4",
+          background: "#1e1e1e",
+          cursor: "#aeafad",
+          selection: "#264f78",
+        },
         workspaces: [
           {
             id: "ws-inbox",
@@ -173,6 +201,14 @@ describe("App terminal pane", () => {
       state: {
         protocolVersion: 1,
         activeWorkspaceId: null,
+        activeTheme: {
+          id: "dark",
+          name: "Dark",
+          foreground: "#d4d4d4",
+          background: "#1e1e1e",
+          cursor: "#aeafad",
+          selection: "#264f78",
+        },
         workspaces: [
           {
             id: "ws-inbox",
@@ -212,6 +248,14 @@ describe("App terminal pane", () => {
       state: {
         protocolVersion: 1,
         activeWorkspaceId: null,
+        activeTheme: {
+          id: "dark",
+          name: "Dark",
+          foreground: "#d4d4d4",
+          background: "#1e1e1e",
+          cursor: "#aeafad",
+          selection: "#264f78",
+        },
         workspaces: [
           {
             id: "ws-inbox",
@@ -251,6 +295,14 @@ describe("App terminal pane", () => {
       state: {
         protocolVersion: 1,
         activeWorkspaceId: null,
+        activeTheme: {
+          id: "dark",
+          name: "Dark",
+          foreground: "#d4d4d4",
+          background: "#1e1e1e",
+          cursor: "#aeafad",
+          selection: "#264f78",
+        },
         workspaces: [
           {
             id: "ws-inbox",
@@ -287,6 +339,14 @@ describe("App terminal pane", () => {
       state: {
         protocolVersion: 1,
         activeWorkspaceId: null,
+        activeTheme: {
+          id: "dark",
+          name: "Dark",
+          foreground: "#d4d4d4",
+          background: "#1e1e1e",
+          cursor: "#aeafad",
+          selection: "#264f78",
+        },
         workspaces: [
           {
             id: "ws-inbox",
@@ -337,6 +397,14 @@ describe("App terminal pane", () => {
       state: {
         protocolVersion: 1,
         activeWorkspaceId: null,
+        activeTheme: {
+          id: "dark",
+          name: "Dark",
+          foreground: "#d4d4d4",
+          background: "#1e1e1e",
+          cursor: "#aeafad",
+          selection: "#264f78",
+        },
         workspaces: [
           {
             id: "ws-inbox",
@@ -427,6 +495,14 @@ describe("App terminal pane", () => {
       state: {
         protocolVersion: 1,
         activeWorkspaceId: null,
+        activeTheme: {
+          id: "dark",
+          name: "Dark",
+          foreground: "#d4d4d4",
+          background: "#1e1e1e",
+          cursor: "#aeafad",
+          selection: "#264f78",
+        },
         workspaces: [
           {
             id: "ws-inbox",
@@ -494,6 +570,14 @@ describe("App terminal pane", () => {
       state: {
         protocolVersion: 1,
         activeWorkspaceId: null,
+        activeTheme: {
+          id: "dark",
+          name: "Dark",
+          foreground: "#d4d4d4",
+          background: "#1e1e1e",
+          cursor: "#aeafad",
+          selection: "#264f78",
+        },
         workspaces: [
           {
             id: "ws-inbox",
@@ -529,6 +613,14 @@ describe("App terminal pane", () => {
       state: {
         protocolVersion: 1,
         activeWorkspaceId: null,
+        activeTheme: {
+          id: "dark",
+          name: "Dark",
+          foreground: "#d4d4d4",
+          background: "#1e1e1e",
+          cursor: "#aeafad",
+          selection: "#264f78",
+        },
         workspaces: [
           {
             id: "ws-inbox",
@@ -577,6 +669,14 @@ describe("App terminal pane", () => {
       state: {
         protocolVersion: 1,
         activeWorkspaceId: null,
+        activeTheme: {
+          id: "dark",
+          name: "Dark",
+          foreground: "#d4d4d4",
+          background: "#1e1e1e",
+          cursor: "#aeafad",
+          selection: "#264f78",
+        },
         workspaces: [
           {
             id: "ws-inbox",
@@ -645,6 +745,14 @@ describe("App terminal pane", () => {
       state: {
         protocolVersion: 1,
         activeWorkspaceId: null,
+        activeTheme: {
+          id: "dark",
+          name: "Dark",
+          foreground: "#d4d4d4",
+          background: "#1e1e1e",
+          cursor: "#aeafad",
+          selection: "#264f78",
+        },
         workspaces: [
           {
             id: "ws-inbox",
@@ -722,6 +830,14 @@ describe("App terminal pane", () => {
       state: {
         protocolVersion: 1,
         activeWorkspaceId: null,
+        activeTheme: {
+          id: "dark",
+          name: "Dark",
+          foreground: "#d4d4d4",
+          background: "#1e1e1e",
+          cursor: "#aeafad",
+          selection: "#264f78",
+        },
         workspaces: [
           {
             id: "ws-inbox",
@@ -758,6 +874,14 @@ describe("App terminal pane", () => {
       state: {
         protocolVersion: 1,
         activeWorkspaceId: null,
+        activeTheme: {
+          id: "dark",
+          name: "Dark",
+          foreground: "#d4d4d4",
+          background: "#1e1e1e",
+          cursor: "#aeafad",
+          selection: "#264f78",
+        },
         workspaces: [
           {
             id: "ws-inbox",
@@ -800,6 +924,14 @@ describe("App terminal pane", () => {
       state: {
         protocolVersion: 1,
         activeWorkspaceId: "ws-api",
+        activeTheme: {
+          id: "dark",
+          name: "Dark",
+          foreground: "#d4d4d4",
+          background: "#1e1e1e",
+          cursor: "#aeafad",
+          selection: "#264f78",
+        },
         workspaces: [
           {
             id: "ws-inbox",
@@ -832,6 +964,14 @@ describe("App terminal pane", () => {
       state: {
         protocolVersion: 1,
         activeWorkspaceId: null,
+        activeTheme: {
+          id: "dark",
+          name: "Dark",
+          foreground: "#d4d4d4",
+          background: "#1e1e1e",
+          cursor: "#aeafad",
+          selection: "#264f78",
+        },
         workspaces: [
           {
             id: "ws-inbox",

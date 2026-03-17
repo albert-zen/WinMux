@@ -14,6 +14,7 @@ use core_session::{
     TerminalSize,
 };
 use core_state::{DesktopBootstrap, WorkspaceRegistry, APP_NAME, STARTER_WORKSPACE_NAME};
+use core_theme::ThemeRegistry;
 use serde::Serialize;
 use serde_json::{Value, json};
 use tauri::Emitter;
@@ -34,6 +35,7 @@ struct RuntimeState<F> {
     registry: WorkspaceRegistry,
     sessions: LiveSessionRegistry<F>,
     notifications: NotificationStore,
+    themes: ThemeRegistry,
     state_path: Option<PathBuf>,
     active_workspace_id: Option<String>,
 }
@@ -64,6 +66,18 @@ struct DesktopState {
     protocol_version: u32,
     workspaces: Vec<WorkspaceState>,
     active_workspace_id: Option<String>,
+    active_theme: ActiveThemeState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ActiveThemeState {
+    id: String,
+    name: String,
+    foreground: String,
+    background: String,
+    cursor: String,
+    selection: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -86,6 +100,7 @@ where
             registry,
             sessions: LiveSessionRegistry::new(factory),
             notifications: NotificationStore::new(),
+            themes: ThemeRegistry::with_builtins(),
             state_path: None,
             active_workspace_id: None,
         };
@@ -102,6 +117,7 @@ where
             registry,
             sessions: LiveSessionRegistry::new(factory),
             notifications: NotificationStore::new(),
+            themes: ThemeRegistry::with_builtins(),
             state_path: Some(state_path),
             active_workspace_id: None,
         };
@@ -229,10 +245,19 @@ where
             })
             .collect();
 
+        let active_theme = self.themes.get_active();
         DesktopState {
             protocol_version: 1,
             workspaces,
             active_workspace_id: self.active_workspace_id.clone(),
+            active_theme: ActiveThemeState {
+                id: active_theme.id.clone(),
+                name: active_theme.name.clone(),
+                foreground: active_theme.palette.foreground.clone(),
+                background: active_theme.palette.background.clone(),
+                cursor: active_theme.palette.cursor.clone(),
+                selection: active_theme.palette.selection.clone(),
+            },
         }
     }
 
@@ -620,6 +645,52 @@ fn get_unread_count(
     state: tauri::State<'_, AppState>,
 ) -> usize {
     state.runtime.lock().unwrap().notifications.unread_count()
+}
+
+#[tauri::command]
+fn get_themes(
+    state: tauri::State<'_, AppState>,
+) -> Value {
+    let runtime = state.runtime.lock().unwrap();
+    let themes: Vec<Value> = runtime
+        .themes
+        .list()
+        .iter()
+        .map(|t| {
+            json!({
+                "id": t.id,
+                "name": t.name,
+            })
+        })
+        .collect();
+    json!({
+        "themes": themes,
+        "activeThemeId": runtime.themes.active_theme_id(),
+    })
+}
+
+#[tauri::command]
+fn set_active_theme(
+    theme_id: String,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    let mut runtime = state.runtime.lock().unwrap();
+    runtime
+        .themes
+        .set_active(&theme_id)
+        .map_err(|_| format!("Theme not found: {theme_id}"))?;
+    let _ = app_handle.emit(DOMAIN_EVENT_NAME, json!({ "type": "themeChanged", "themeId": theme_id }));
+    Ok(())
+}
+
+#[tauri::command]
+fn get_active_theme(
+    state: tauri::State<'_, AppState>,
+) -> Value {
+    let runtime = state.runtime.lock().unwrap();
+    let theme = runtime.themes.get_active();
+    serde_json::to_value(theme).unwrap_or_else(|_| json!({}))
 }
 
 fn default_terminal_size() -> TerminalSize {
@@ -1249,7 +1320,10 @@ pub fn run() {
             notify_send,
             get_notifications,
             mark_notification_read,
-            get_unread_count
+            get_unread_count,
+            get_themes,
+            set_active_theme,
+            get_active_theme
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -2626,5 +2700,39 @@ mod tests {
         assert_eq!(runtime.notifications.unread_count(), 2);
         runtime.notifications.mark_read("n1").unwrap();
         assert_eq!(runtime.notifications.unread_count(), 1);
+    }
+
+    #[test]
+    fn theme_registry_initialized_with_builtins() {
+        let runtime = test_runtime();
+        assert_eq!(runtime.themes.list().len(), 3);
+        assert_eq!(runtime.themes.active_theme_id(), "dark");
+    }
+
+    #[test]
+    fn theme_set_active_changes_theme() {
+        let mut runtime = test_runtime();
+        runtime.themes.set_active("light").unwrap();
+        assert_eq!(runtime.themes.active_theme_id(), "light");
+        assert_eq!(runtime.themes.get_active().name, "Light");
+    }
+
+    #[test]
+    fn snapshot_includes_active_theme() {
+        let mut runtime = test_runtime();
+        let snapshot = runtime.snapshot();
+        assert_eq!(snapshot.active_theme.id, "dark");
+        assert_eq!(snapshot.active_theme.name, "Dark");
+        assert!(!snapshot.active_theme.foreground.is_empty());
+        assert!(!snapshot.active_theme.background.is_empty());
+    }
+
+    #[test]
+    fn snapshot_reflects_changed_theme() {
+        let mut runtime = test_runtime();
+        runtime.themes.set_active("solarized-dark").unwrap();
+        let snapshot = runtime.snapshot();
+        assert_eq!(snapshot.active_theme.id, "solarized-dark");
+        assert_eq!(snapshot.active_theme.name, "Solarized Dark");
     }
 }

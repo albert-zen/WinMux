@@ -21,6 +21,7 @@ core-layout = { path = "../../../crates/core-layout" }
 core-notify = { path = "../../../crates/core-notify" }
 core-session = { path = "../../../crates/core-session" }
 core-state = { path = "../../../crates/core-state" }
+core-theme = { path = "../../../crates/core-theme" }
 dirs = "6"
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"

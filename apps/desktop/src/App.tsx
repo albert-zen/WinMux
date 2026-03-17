@@ -13,6 +13,7 @@ import {
 } from "./lib/desktopClient";
 import { WorkspaceSplitView } from "./components/WorkspaceSplitView";
 import { NotificationCenter } from "./components/NotificationCenter";
+import { ThemeSelector } from "./components/ThemeSelector";
 import "./App.css";
 
 function App() {
@@ -376,6 +377,8 @@ function App() {
               </p>
             ) : null}
           </div>
+
+          <ThemeSelector />
         </aside>
 
         {workspace ? (

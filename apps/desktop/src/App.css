@@ -484,6 +484,36 @@ input {
   color: #f0b48f;
 }
 
+.theme-selector {
+  padding-top: 6px;
+  border-top: 1px solid #322c27;
+}
+
+.theme-selector label {
+  display: grid;
+  gap: 6px;
+}
+
+.theme-selector span {
+  color: #b9b0a4;
+  font-size: 0.9rem;
+}
+
+.theme-selector select {
+  background: #201c19;
+  border: 1px solid #342d27;
+  border-radius: 8px;
+  color: #ece8df;
+  padding: 8px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.theme-selector select:focus {
+  outline: 1px solid #7b4b2a;
+  border-color: #7b4b2a;
+}
+
 @media (max-width: 720px) {
   .app-shell {
     padding: 16px;

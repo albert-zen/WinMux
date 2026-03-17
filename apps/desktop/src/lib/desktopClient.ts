@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { NotificationPayload } from "@cmux-win/protocol";
+import type { NotificationPayload, ThemeListResponse } from "@cmux-win/protocol";
 
 type WorkspaceCreateResult = {
   workspaceId: string;
@@ -74,4 +74,12 @@ export function markNotificationRead(id: string): Promise<void> {
 
 export function getUnreadCount(): Promise<number> {
   return invoke("get_unread_count");
+}
+
+export function getThemes(): Promise<ThemeListResponse> {
+  return invoke("get_themes");
+}
+
+export function setActiveTheme(themeId: string): Promise<void> {
+  return invoke("set_active_theme", { themeId });
 }
