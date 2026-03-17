@@ -345,6 +345,64 @@ input {
   margin: 0;
 }
 
+.error-banner {
+  background: #3d2215;
+  border: 1px solid #7b4b2a;
+  border-radius: 10px;
+  padding: 12px 16px;
+  color: #e7a27a;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.9rem;
+}
+
+.error-banner-dismiss {
+  background: transparent;
+  border: 1px solid #7b4b2a;
+  border-radius: 6px;
+  color: #e7a27a;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.operation-error {
+  margin: 0;
+  color: #e7a27a;
+  font-size: 0.85rem;
+  padding: 6px 10px;
+  background: #2d1f16;
+  border: 1px solid #5a3a24;
+  border-radius: 6px;
+}
+
+.pane-terminal-wrapper {
+  position: relative;
+  height: 100%;
+  min-height: 220px;
+}
+
+.pane-terminal-wrapper .pane-terminal-surface {
+  min-height: 0;
+  height: 100%;
+}
+
+.session-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(21, 19, 17, 0.75);
+  color: #b9b0a4;
+  font-size: 0.9rem;
+  border-radius: 8px;
+  pointer-events: none;
+}
+
 @media (max-width: 720px) {
   .app-shell {
     padding: 16px;

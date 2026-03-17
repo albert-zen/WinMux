@@ -33,6 +33,9 @@ vi.mock("./components/PaneTerminal", () => ({
 
 describe("App terminal pane", () => {
   beforeEach(() => {
+    vi.mocked(paneSplit).mockResolvedValue(undefined);
+    vi.mocked(sessionRestart).mockResolvedValue(undefined);
+    vi.mocked(paneClose).mockResolvedValue(undefined);
     vi.mocked(useDesktopState).mockReturnValue({
       state: {
         protocolVersion: 1,
@@ -651,5 +654,122 @@ describe("App terminal pane", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open api" }));
 
     expect((screen.getByLabelText("Rename Workspace") as HTMLInputElement).value).toBe("api");
+  });
+
+  it("renders error banner when useDesktopState returns an error", () => {
+    vi.mocked(useDesktopState).mockReturnValue({
+      state: null,
+      error: "desktop state failed",
+    });
+
+    render(<App />);
+
+    const banner = screen.getByRole("alert");
+    expect(banner).toBeTruthy();
+    expect(banner.textContent).toContain("desktop state failed");
+    expect(banner.className).toContain("error-banner");
+  });
+
+  it("error banner can be dismissed", () => {
+    vi.mocked(useDesktopState).mockReturnValue({
+      state: null,
+      error: "desktop state failed",
+    });
+
+    render(<App />);
+
+    expect(screen.getByRole("alert")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss error" }));
+
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("pane split failure shows error", async () => {
+    vi.mocked(paneSplit).mockRejectedValue(new Error("split failed"));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Split Right" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("split failed")).toBeTruthy();
+    });
+  });
+
+  it("session restart failure shows error", async () => {
+    vi.mocked(useDesktopState).mockReturnValue({
+      state: {
+        protocolVersion: 1,
+        workspaces: [
+          {
+            id: "ws-inbox",
+            name: "inbox",
+            rootDir: "D:\\dev\\inbox",
+            shellProfile: "cmd.exe",
+            focusedPaneId: "pane-1",
+            panes: [
+              {
+                paneId: "pane-1",
+                sessionId: "session:1",
+                status: "exited",
+                output: "process exited",
+              },
+            ],
+          },
+        ],
+      },
+      error: null,
+    });
+    vi.mocked(sessionRestart).mockRejectedValue(new Error("restart failed"));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("restart failed")).toBeTruthy();
+    });
+  });
+
+  it("pane close failure shows error", async () => {
+    vi.mocked(useDesktopState).mockReturnValue({
+      state: {
+        protocolVersion: 1,
+        workspaces: [
+          {
+            id: "ws-inbox",
+            name: "inbox",
+            rootDir: "D:\\dev\\inbox",
+            shellProfile: "cmd.exe",
+            focusedPaneId: "pane-1",
+            panes: [
+              {
+                paneId: "pane-1",
+                sessionId: "session:1",
+                status: "running",
+                output: "one",
+              },
+              {
+                paneId: "pane-2",
+                sessionId: "session:2",
+                status: "running",
+                output: "two",
+              },
+            ],
+          },
+        ],
+      },
+      error: null,
+    });
+    vi.mocked(paneClose).mockRejectedValue(new Error("close pane failed"));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close pane-2" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("close pane failed")).toBeTruthy();
+    });
   });
 });

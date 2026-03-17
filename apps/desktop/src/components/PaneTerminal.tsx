@@ -117,11 +117,23 @@ export function PaneTerminal({ pane, isFocused }: Props) {
     }
   }, [isFocused]);
 
+  const overlayMessage =
+    pane.status === "exited"
+      ? "Session exited \u2014 press Restart"
+      : pane.status === "none"
+        ? "No session"
+        : null;
+
   return (
-    <div
-      className="pane-terminal-surface"
-      data-testid={`pane-terminal-${pane.paneId}`}
-      ref={containerRef}
-    />
+    <div className="pane-terminal-wrapper">
+      <div
+        className="pane-terminal-surface"
+        data-testid={`pane-terminal-${pane.paneId}`}
+        ref={containerRef}
+      />
+      {overlayMessage ? (
+        <div className="session-overlay">{overlayMessage}</div>
+      ) : null}
+    </div>
   );
 }

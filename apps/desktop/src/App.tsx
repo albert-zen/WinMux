@@ -20,6 +20,10 @@ function App() {
   const [closeError, setCloseError] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [splitError, setSplitError] = useState<string | null>(null);
+  const [restartError, setRestartError] = useState<string | null>(null);
+  const [paneCloseError, setPaneCloseError] = useState<string | null>(null);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
   const [renameOverrides, setRenameOverrides] = useState<Record<string, string>>({});
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameName, setRenameName] = useState("");
@@ -156,7 +160,10 @@ function App() {
       return;
     }
 
-    void paneSplit(workspace.id, focusedPane.paneId, "vertical");
+    setSplitError(null);
+    paneSplit(workspace.id, focusedPane.paneId, "vertical").catch((reason) => {
+      setSplitError(reason instanceof Error ? reason.message : String(reason));
+    });
   };
 
   const handleRestart = (sessionId: string | null) => {
@@ -164,7 +171,10 @@ function App() {
       return;
     }
 
-    void sessionRestart(sessionId);
+    setRestartError(null);
+    sessionRestart(sessionId).catch((reason) => {
+      setRestartError(reason instanceof Error ? reason.message : String(reason));
+    });
   };
 
   const handleFocus = (paneId: string) => {
@@ -174,7 +184,10 @@ function App() {
 
   const handleClose = (paneId: string) => {
     if (!workspace) return;
-    void paneClose(workspace.id, paneId);
+    setPaneCloseError(null);
+    paneClose(workspace.id, paneId).catch((reason) => {
+      setPaneCloseError(reason instanceof Error ? reason.message : String(reason));
+    });
   };
 
   const handleCloseWorkspace = async (workspaceId: string) => {
@@ -218,8 +231,29 @@ function App() {
     }
   };
 
+  const showBanner = error && !bannerDismissed;
+
+  // Reset dismissed state when the error message changes
+  useEffect(() => {
+    setBannerDismissed(false);
+  }, [error]);
+
   return (
     <main className="app-shell">
+      {showBanner ? (
+        <div className="error-banner" role="alert">
+          <span>{error}</span>
+          <button
+            type="button"
+            aria-label="Dismiss error"
+            className="error-banner-dismiss"
+            onClick={() => setBannerDismissed(true)}
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
+
       <header className="app-header">
         <div>
           <h1>{APP_NAME}</h1>
@@ -348,6 +382,22 @@ function App() {
               </button>
             </div>
 
+            {splitError ? (
+              <p className="operation-error" role="status">
+                {splitError}
+              </p>
+            ) : null}
+            {restartError ? (
+              <p className="operation-error" role="status">
+                {restartError}
+              </p>
+            ) : null}
+            {paneCloseError ? (
+              <p className="operation-error" role="status">
+                {paneCloseError}
+              </p>
+            ) : null}
+
             <WorkspaceSplitView
               workspace={workspace}
               onFocusPane={handleFocus}
@@ -361,8 +411,6 @@ function App() {
           </section>
         )}
       </section>
-
-      {error ? <p className="error-text">{error}</p> : null}
     </main>
   );
 }

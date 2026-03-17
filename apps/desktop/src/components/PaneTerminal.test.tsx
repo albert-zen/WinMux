@@ -206,4 +206,36 @@ describe("PaneTerminal", () => {
 
     expect(sessionSendInput).not.toHaveBeenCalled();
   });
+
+  it("shows session exited overlay when status is exited", () => {
+    const { container } = render(
+      <PaneTerminal pane={makePane({ status: "exited" })} isFocused={false} />,
+    );
+
+    const overlay = container.querySelector(".session-overlay");
+    expect(overlay).toBeTruthy();
+    expect(overlay!.textContent).toContain("Session exited");
+  });
+
+  it("shows no session overlay when status is none", () => {
+    const { container } = render(
+      <PaneTerminal
+        pane={makePane({ status: "none", sessionId: null })}
+        isFocused={false}
+      />,
+    );
+
+    const overlay = container.querySelector(".session-overlay");
+    expect(overlay).toBeTruthy();
+    expect(overlay!.textContent).toContain("No session");
+  });
+
+  it("does NOT show overlay when status is running", () => {
+    const { container } = render(
+      <PaneTerminal pane={makePane({ status: "running" })} isFocused={false} />,
+    );
+
+    const overlay = container.querySelector(".session-overlay");
+    expect(overlay).toBeNull();
+  });
 });
