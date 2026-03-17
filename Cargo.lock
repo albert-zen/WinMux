@@ -464,6 +464,7 @@ dependencies = [
  "core-layout",
  "core-session",
  "core-state",
+ "dirs",
  "serde",
  "serde_json",
  "tauri",

@@ -4,6 +4,7 @@ use std::sync::{
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::HashSet;
+use std::path::PathBuf;
 
 use core_ipc::{ErrorCode, ProtocolError, RequestEnvelope, ResponseEnvelope, ResponseExt};
 use core_session::{
@@ -29,6 +30,7 @@ pub struct AppState {
 struct RuntimeState<F> {
     registry: WorkspaceRegistry,
     sessions: LiveSessionRegistry<F>,
+    state_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -71,13 +73,49 @@ impl<F> RuntimeState<F>
 where
     F: SessionHostFactory,
 {
+    #[cfg(test)]
     fn new(registry: WorkspaceRegistry, factory: F) -> Self {
         let mut runtime = Self {
             registry,
             sessions: LiveSessionRegistry::new(factory),
+            state_path: None,
         };
         runtime.ensure_sessions_for_all_panes();
         runtime
+    }
+
+    fn new_with_state_path(
+        registry: WorkspaceRegistry,
+        factory: F,
+        state_path: PathBuf,
+    ) -> Self {
+        let mut runtime = Self {
+            registry,
+            sessions: LiveSessionRegistry::new(factory),
+            state_path: Some(state_path),
+        };
+        runtime.ensure_sessions_for_all_panes();
+        runtime
+    }
+
+    fn save_registry(&self) {
+        if let Some(ref path) = self.state_path {
+            if let Ok(json) = self.registry.to_persisted_json() {
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let temp_path = path.with_extension("json.tmp");
+                if std::fs::write(&temp_path, json).is_ok() {
+                    let rename_result = std::fs::rename(&temp_path, path).or_else(|_| {
+                        let _ = std::fs::remove_file(path);
+                        std::fs::rename(&temp_path, path)
+                    });
+                    if rename_result.is_err() {
+                        let _ = std::fs::remove_file(&temp_path);
+                    }
+                }
+            }
+        }
     }
 
     fn desktop_bootstrap(&self) -> DesktopBootstrap {
@@ -340,6 +378,31 @@ fn workspace_close(
 }
 
 #[tauri::command]
+fn workspace_rename(
+    workspace_id: String,
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let request = RequestEnvelope::new(
+        "desktop-workspace-rename",
+        "workspace.rename",
+        json!({
+            "workspaceId": workspace_id,
+            "name": name,
+        }),
+    );
+    let response = dispatch_runtime_request(&request, &mut state.runtime.lock().unwrap());
+    if response.is_ok() {
+        Ok(())
+    } else {
+        Err(response
+            .error()
+            .map(|error| error.message.clone())
+            .unwrap_or_else(|| "workspace rename failed".to_string()))
+    }
+}
+
+#[tauri::command]
 fn session_send_input(
     session_id: String,
     input: String,
@@ -477,6 +540,7 @@ where
     match request.command() {
         "workspace.create" => handle_workspace_create(request, runtime),
         "workspace.close" => handle_workspace_close(request, runtime),
+        "workspace.rename" => handle_workspace_rename(request, runtime),
         "pane.split" => handle_pane_split(request, runtime),
         "pane.focus" => handle_pane_focus(request, runtime),
         "pane.close" => handle_pane_close(request, runtime),
@@ -497,7 +561,25 @@ fn handle_pane_focus<F>(
 where
     F: SessionHostFactory,
 {
-    core_ipc::dispatch(request, &mut runtime.registry)
+    let response = core_ipc::dispatch(request, &mut runtime.registry);
+    if response.is_ok() {
+        runtime.save_registry();
+    }
+    response
+}
+
+fn handle_workspace_rename<F>(
+    request: &RequestEnvelope,
+    runtime: &mut RuntimeState<F>,
+) -> ResponseEnvelope
+where
+    F: SessionHostFactory,
+{
+    let response = core_ipc::dispatch(request, &mut runtime.registry);
+    if response.is_ok() {
+        runtime.save_registry();
+    }
+    response
 }
 
 fn handle_pane_close<F>(
@@ -520,6 +602,7 @@ where
     let response = core_ipc::dispatch(request, &mut runtime.registry);
     if response.is_ok() {
         runtime.sessions.remove_pane(&workspace_id, &pane_id);
+        runtime.save_registry();
     }
     response
 }
@@ -638,14 +721,17 @@ where
             .with_working_dir(root_dir),
         default_terminal_size(),
     ) {
-        Ok(session_id) => ResponseEnvelope::success(
-            request.id(),
-            json!({
-                "workspaceId": workspace_id,
-                "paneId": pane_id,
-                "sessionId": session_id,
-            }),
-        ),
+        Ok(session_id) => {
+            runtime.save_registry();
+            ResponseEnvelope::success(
+                request.id(),
+                json!({
+                    "workspaceId": workspace_id,
+                    "paneId": pane_id,
+                    "sessionId": session_id,
+                }),
+            )
+        }
         Err(error) => {
             let _ = runtime.registry.remove_workspace(&workspace_id);
             runtime_error_response(request.id(), error)
@@ -682,6 +768,7 @@ where
         for pane_id in &pane_ids {
             runtime.sessions.remove_pane(&workspace_id, pane_id);
         }
+        runtime.save_registry();
     }
     response
 }
@@ -740,14 +827,17 @@ where
             .with_working_dir(root_dir),
         default_terminal_size(),
     ) {
-        Ok(session_id) => ResponseEnvelope::success(
-            request.id(),
-            json!({
-                "workspaceId": workspace_id,
-                "newPaneId": pane_id,
-                "sessionId": session_id,
-            }),
-        ),
+        Ok(session_id) => {
+            runtime.save_registry();
+            ResponseEnvelope::success(
+                request.id(),
+                json!({
+                    "workspaceId": workspace_id,
+                    "newPaneId": pane_id,
+                    "sessionId": session_id,
+                }),
+            )
+        }
         Err(error) => {
             rollback_split_panes(&mut runtime.registry, &workspace_id, &existing_pane_ids);
             runtime_error_response(request.id(), error)
@@ -1056,11 +1146,26 @@ async fn handle_pipe_connection(
     }
 }
 
+fn load_registry_from_state_path(path: &std::path::Path) -> WorkspaceRegistry {
+    match std::fs::read_to_string(path) {
+        Ok(json) => WorkspaceRegistry::from_persisted_json(&json)
+            .unwrap_or_else(|_| core_state::starter_workspace_registry()),
+        Err(_) => core_state::starter_workspace_registry(),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let runtime = Arc::new(Mutex::new(RuntimeState::new(
-        core_state::starter_workspace_registry(),
+    let state_path = dirs::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("cmux-win")
+        .join("state.json");
+
+    let registry = load_registry_from_state_path(&state_path);
+    let runtime = Arc::new(Mutex::new(RuntimeState::new_with_state_path(
+        registry,
         PtySessionFactory,
+        state_path,
     )));
     let event_runtime = Arc::clone(&runtime);
 
@@ -1079,6 +1184,7 @@ pub fn run() {
             desktop_state,
             workspace_create,
             workspace_close,
+            workspace_rename,
             pane_split,
             pane_focus,
             pane_close,
@@ -1095,7 +1201,10 @@ mod tests {
     use super::*;
     use core_ipc::ResponseExt;
     use core_session::SessionHost;
+    use std::fs;
+    use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[derive(Default)]
     struct FakeFactoryState {
@@ -1168,6 +1277,16 @@ mod tests {
 
     fn test_runtime_with_factory(factory: FakeFactory) -> RuntimeState<FakeFactory> {
         RuntimeState::new(core_state::starter_workspace_registry(), factory)
+    }
+
+    fn unique_state_path(label: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir()
+            .join(format!("cmux-win-{label}-{nanos}"))
+            .join("state.json")
     }
 
     #[test]
@@ -2191,5 +2310,112 @@ mod tests {
 
         let snapshot = runtime.snapshot();
         assert!(snapshot.workspaces.is_empty());
+    }
+
+    #[test]
+    fn handle_runtime_request_workspace_rename_updates_snapshot_name() {
+        let mut runtime = test_runtime();
+
+        let raw = handle_runtime_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req-ws-rename",
+                "type": "command",
+                "command": "workspace.rename",
+                "payload": {
+                    "workspaceId": "ws-inbox",
+                    "name": "Inbox Prime"
+                }
+            }"#,
+            &mut runtime,
+        );
+
+        let response: ResponseEnvelope = serde_json::from_str(&raw).unwrap();
+        assert!(response.is_ok());
+        assert_eq!(runtime.snapshot().workspaces[0].name, "Inbox Prime");
+    }
+
+    #[test]
+    fn handle_runtime_request_workspace_rename_returns_not_found_for_unknown_workspace() {
+        let mut runtime = test_runtime();
+
+        let raw = handle_runtime_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req-ws-rename-missing",
+                "type": "command",
+                "command": "workspace.rename",
+                "payload": {
+                    "workspaceId": "ws-missing",
+                    "name": "Inbox Prime"
+                }
+            }"#,
+            &mut runtime,
+        );
+
+        let response: ResponseEnvelope = serde_json::from_str(&raw).unwrap();
+        assert!(!response.is_ok());
+        assert_eq!(response.error().unwrap().code, ErrorCode::NotFound);
+    }
+
+    #[test]
+    fn save_and_load_registry_roundtrip_restores_workspaces_and_sessions() {
+        let state_path = unique_state_path("restore");
+        let mut runtime = RuntimeState::new_with_state_path(
+            core_state::starter_workspace_registry(),
+            FakeFactory::default(),
+            state_path.clone(),
+        );
+
+        let split = RequestEnvelope::new(
+            "persist-split",
+            "pane.split",
+            json!({
+                "workspaceId": "ws-inbox",
+                "paneId": "pane-1",
+                "newPaneId": "pane-2",
+                "orientation": "vertical",
+                "ratio": 0.5
+            }),
+        );
+        let rename = RequestEnvelope::new(
+            "persist-rename",
+            "workspace.rename",
+            json!({
+                "workspaceId": "ws-inbox",
+                "name": "Inbox Prime"
+            }),
+        );
+
+        let split_response = handle_pane_split(&split, &mut runtime);
+        assert!(split_response.is_ok());
+        let rename_response = handle_workspace_rename(&rename, &mut runtime);
+        assert!(rename_response.is_ok());
+        assert!(state_path.exists());
+
+        let restored_registry = load_registry_from_state_path(&state_path);
+        let mut restored_runtime = RuntimeState::new(restored_registry, FakeFactory::default());
+        let snapshot = restored_runtime.snapshot();
+
+        assert_eq!(snapshot.workspaces.len(), 1);
+        assert_eq!(snapshot.workspaces[0].name, "Inbox Prime");
+        assert_eq!(snapshot.workspaces[0].panes.len(), 2);
+        assert!(snapshot.workspaces[0].panes.iter().all(|pane| pane.session_id.is_some()));
+
+        let _ = fs::remove_file(state_path);
+    }
+
+    #[test]
+    fn load_registry_from_state_path_falls_back_to_starter_on_invalid_json() {
+        let state_path = unique_state_path("invalid");
+        fs::create_dir_all(state_path.parent().unwrap()).expect("state dir should exist");
+        fs::write(&state_path, "{invalid").expect("invalid state should be written");
+
+        let restored_registry = load_registry_from_state_path(&state_path);
+
+        assert_eq!(restored_registry.list().len(), 1);
+        assert_eq!(restored_registry.list()[0].id, "ws-inbox");
+
+        let _ = fs::remove_file(state_path);
     }
 }

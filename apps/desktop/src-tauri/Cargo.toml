@@ -19,6 +19,7 @@ core-ipc = { path = "../../../crates/core-ipc" }
 core-layout = { path = "../../../crates/core-layout" }
 core-session = { path = "../../../crates/core-session" }
 core-state = { path = "../../../crates/core-state" }
+dirs = "6"
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }

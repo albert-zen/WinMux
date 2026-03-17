@@ -107,6 +107,13 @@ if (cmd === "workspace") {
     request = buildRequest("workspace.close", {
       workspaceId: f["workspace-id"],
     });
+  } else if (sub === "rename") {
+    const f = parseFlags(flagArgs);
+    requireFlags(f, "workspace-id", "name");
+    request = buildRequest("workspace.rename", {
+      workspaceId: f["workspace-id"],
+      name: f["name"],
+    });
   } else {
     die(`unknown subcommand: workspace ${sub ?? "(none)"}`);
   }

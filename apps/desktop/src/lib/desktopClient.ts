@@ -45,3 +45,7 @@ export function paneClose(workspaceId: string, paneId: string): Promise<void> {
 export function workspaceClose(workspaceId: string): Promise<void> {
   return invoke("workspace_close", { workspaceId });
 }
+
+export function workspaceRename(workspaceId: string, name: string): Promise<void> {
+  return invoke("workspace_rename", { workspaceId, name });
+}

@@ -8,6 +8,7 @@ import {
   paneClose,
   workspaceClose,
   workspaceCreate,
+  workspaceRename,
 } from "./lib/desktopClient";
 import { WorkspaceSplitView } from "./components/WorkspaceSplitView";
 import "./App.css";
@@ -18,6 +19,10 @@ function App() {
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
   const [closeError, setCloseError] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [renameOverrides, setRenameOverrides] = useState<Record<string, string>>({});
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameName, setRenameName] = useState("");
   const [createForm, setCreateForm] = useState({
     name: "",
     rootDir: "D:\\dev\\workspace",
@@ -60,13 +65,42 @@ function App() {
     }));
   }, [activeWorkspaceId, pendingWorkspace, state?.workspaces]);
 
+  useEffect(() => {
+    const actualNames = new Map((state?.workspaces ?? []).map((entry) => [entry.id, entry.name]));
+    setRenameOverrides((prev) => {
+      let changed = false;
+      const next: Record<string, string> = {};
+      for (const [workspaceId, overrideName] of Object.entries(prev)) {
+        const actualName = actualNames.get(workspaceId);
+        if (actualName && actualName !== overrideName) {
+          next[workspaceId] = overrideName;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [state?.workspaces]);
+
+  const baseWorkspaces = (state?.workspaces ?? []).map((entry) => {
+    const overrideName = renameOverrides[entry.id];
+    return overrideName && overrideName !== entry.name
+      ? { ...entry, name: overrideName }
+      : entry;
+  });
+
   const workspaces =
     pendingWorkspace &&
-    !state?.workspaces?.some((workspace) => workspace.id === pendingWorkspace.id)
-      ? [...(state?.workspaces ?? []), pendingWorkspace]
-      : (state?.workspaces ?? []);
+    !baseWorkspaces.some((entry) => entry.id === pendingWorkspace.id)
+      ? [...baseWorkspaces, pendingWorkspace]
+      : baseWorkspaces;
   const workspace =
     workspaces.find((entry) => entry.id === activeWorkspaceId) ?? workspaces[0] ?? null;
+
+  useEffect(() => {
+    setRenameName(workspace?.name ?? "");
+    setRenameError(null);
+  }, [workspace?.id, workspace?.name]);
 
   const handleWorkspaceSelect = (workspaceId: string) => {
     setActiveWorkspaceId(workspaceId);
@@ -165,6 +199,25 @@ function App() {
     handleRestart(pane.sessionId);
   };
 
+  const handleRenameWorkspace = async () => {
+    const name = renameName.trim();
+    if (!name || !workspace) return;
+    setRenameError(null);
+    setIsRenaming(true);
+    try {
+      await workspaceRename(workspace.id, name);
+      setRenameOverrides((prev) => ({
+        ...prev,
+        [workspace.id]: name,
+      }));
+      setRenameName(name);
+    } catch (reason) {
+      setRenameError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setIsRenaming(false);
+    }
+  };
+
   return (
     <main className="app-shell">
       <header className="app-header">
@@ -253,6 +306,31 @@ function App() {
             {createError ? (
               <p className="create-error" role="alert">
                 {createError}
+              </p>
+            ) : null}
+          </div>
+
+          <div className="workspace-rail-section workspace-create">
+            <strong>Rename Workspace</strong>
+            <label>
+              <span>Rename Workspace</span>
+              <input
+                value={renameName}
+                onChange={(event) => setRenameName(event.target.value)}
+                disabled={isRenaming || !workspace}
+                maxLength={255}
+              />
+            </label>
+            <button
+              type="button"
+              disabled={isRenaming || !workspace || !renameName.trim()}
+              onClick={() => void handleRenameWorkspace()}
+            >
+              Save Workspace Name
+            </button>
+            {renameError ? (
+              <p className="create-error" role="alert">
+                {renameError}
               </p>
             ) : null}
           </div>

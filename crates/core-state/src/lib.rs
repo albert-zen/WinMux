@@ -4,6 +4,33 @@ use serde::{Deserialize, Serialize};
 pub const APP_NAME: &str = "cmux-win";
 pub const STARTER_WORKSPACE_NAME: &str = "inbox";
 
+// ── Persistence / restore ────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RestoreError {
+    InvalidJson,
+    UnsupportedProtocolVersion,
+    DuplicateWorkspaceId,
+    EmptyWorkspaceLayout,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedRegistry {
+    protocol_version: u32,
+    workspaces: Vec<PersistedWorkspace>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedWorkspace {
+    id: String,
+    name: String,
+    root_dir: String,
+    shell_profile: String,
+    layout: WorkspaceLayout,
+}
+
 // ── Bootstrap / snapshot types (unchanged) ──────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -147,6 +174,7 @@ pub struct WorkspaceRecord {
 pub enum WorkspaceError {
     WorkspaceNotFound,
     DuplicateWorkspaceId,
+    InvalidWorkspaceName,
     Layout(LayoutError),
 }
 
@@ -250,6 +278,26 @@ impl WorkspaceRegistry {
         Ok(())
     }
 
+    pub fn rename_workspace(
+        &mut self,
+        workspace_id: &str,
+        new_name: &str,
+    ) -> Result<(), WorkspaceError> {
+        let trimmed_name = new_name.trim();
+        if trimmed_name.is_empty() {
+            return Err(WorkspaceError::InvalidWorkspaceName);
+        }
+
+        let ws = self
+            .workspaces
+            .iter_mut()
+            .find(|w| w.id == workspace_id)
+            .ok_or(WorkspaceError::WorkspaceNotFound)?;
+
+        ws.name = trimmed_name.to_string();
+        Ok(())
+    }
+
     pub fn focus_pane(
         &mut self,
         workspace_id: &str,
@@ -263,6 +311,55 @@ impl WorkspaceRegistry {
 
         ws.layout.focus_pane(pane_id)?;
         Ok(())
+    }
+
+    /// Serialize the registry to JSON for persistence.
+    pub fn to_persisted_json(&self) -> serde_json::Result<String> {
+        let persisted = PersistedRegistry {
+            protocol_version: 1,
+            workspaces: self
+                .workspaces
+                .iter()
+                .map(|ws| PersistedWorkspace {
+                    id: ws.id.clone(),
+                    name: ws.name.clone(),
+                    root_dir: ws.root_dir.clone(),
+                    shell_profile: ws.shell_profile.clone(),
+                    layout: ws.layout.clone(),
+                })
+                .collect(),
+        };
+        serde_json::to_string(&persisted)
+    }
+
+    /// Restore a registry from persisted JSON.
+    pub fn from_persisted_json(json: &str) -> Result<Self, RestoreError> {
+        let persisted: PersistedRegistry =
+            serde_json::from_str(json).map_err(|_| RestoreError::InvalidJson)?;
+        if persisted.protocol_version != 1 {
+            return Err(RestoreError::UnsupportedProtocolVersion);
+        }
+
+        let mut registry = Self::new();
+        let mut seen_ids = std::collections::HashSet::new();
+
+        for ws in persisted.workspaces {
+            if !seen_ids.insert(ws.id.clone()) {
+                return Err(RestoreError::DuplicateWorkspaceId);
+            }
+            if ws.layout.panes.is_empty() {
+                return Err(RestoreError::EmptyWorkspaceLayout);
+            }
+            registry.workspaces.push(WorkspaceRecord {
+                id: ws.id,
+                name: ws.name,
+                root_dir: ws.root_dir,
+                shell_profile: ws.shell_profile,
+                layout: ws.layout,
+            });
+        }
+
+        Ok(registry)
     }
 }
 
@@ -502,6 +599,35 @@ mod tests {
     }
 
     #[test]
+    fn rename_workspace_updates_name_and_summaries() {
+        let mut reg = make_registry_with_two();
+
+        reg.rename_workspace("ws-a", "Alpha Prime")
+            .expect("existing workspace should rename");
+
+        assert_eq!(reg.list()[0].name, "Alpha Prime");
+        assert_eq!(reg.summaries()[0].name, "Alpha Prime");
+    }
+
+    #[test]
+    fn rename_workspace_on_unknown_workspace_returns_workspace_not_found() {
+        let mut reg = make_registry_with_two();
+
+        let err = reg.rename_workspace("ws-missing", "Renamed").unwrap_err();
+
+        assert_eq!(err, WorkspaceError::WorkspaceNotFound);
+    }
+
+    #[test]
+    fn rename_workspace_rejects_blank_names() {
+        let mut reg = make_registry_with_two();
+
+        let err = reg.rename_workspace("ws-a", "   ").unwrap_err();
+
+        assert_eq!(err, WorkspaceError::InvalidWorkspaceName);
+    }
+
+    #[test]
     fn workspace_record_stores_correct_fields() {
         let layout = WorkspaceLayout::starter();
         let mut reg = WorkspaceRegistry::new();
@@ -565,5 +691,104 @@ mod tests {
 
         assert_eq!(duplicate, Err(WorkspaceError::DuplicateWorkspaceId));
         assert_eq!(reg.list().len(), 1);
+    }
+
+    #[test]
+    fn persisted_state_roundtrip_preserves_workspace_layout_and_focus() {
+        let mut reg = make_registry_with_two();
+        reg.split_pane("ws-a", "pane-1", "pane-2", SplitOrientation::Vertical, 0.5)
+            .expect("split should succeed");
+        reg.focus_pane("ws-a", "pane-1").expect("focus should succeed");
+        reg.rename_workspace("ws-b", "Beta Prime")
+            .expect("rename should succeed");
+
+        let json = reg
+            .to_persisted_json()
+            .expect("registry should serialize to persisted json");
+        let restored =
+            WorkspaceRegistry::from_persisted_json(&json).expect("persisted json should restore");
+
+        assert_eq!(restored.list().len(), 2);
+        assert_eq!(restored.list()[0].layout.snapshot().pane_count, 2);
+        assert_eq!(restored.list()[0].layout.focused_pane_id, "pane-1");
+        assert_eq!(restored.list()[1].name, "Beta Prime");
+    }
+
+    #[test]
+    fn persisted_state_rejects_duplicate_workspace_ids() {
+        let json = r#"{
+            "protocolVersion": 1,
+            "workspaces": [
+                {
+                    "id": "ws-a",
+                    "name": "Alpha",
+                    "rootDir": "/alpha",
+                    "shellProfile": "pwsh",
+                    "layout": {
+                        "panes": [{ "paneId": "pane-1", "sessionKind": "runningShell" }],
+                        "focusedPaneId": "pane-1",
+                        "splitCount": 0
+                    }
+                },
+                {
+                    "id": "ws-a",
+                    "name": "Beta",
+                    "rootDir": "/beta",
+                    "shellProfile": "cmd.exe",
+                    "layout": {
+                        "panes": [{ "paneId": "pane-7", "sessionKind": "freshShell" }],
+                        "focusedPaneId": "pane-7",
+                        "splitCount": 0
+                    }
+                }
+            ]
+        }"#;
+
+        let err = WorkspaceRegistry::from_persisted_json(json).unwrap_err();
+
+        assert_eq!(err, RestoreError::DuplicateWorkspaceId);
+    }
+
+    #[test]
+    fn persisted_state_rejects_empty_workspace_layouts() {
+        let json = r#"{
+            "protocolVersion": 1,
+            "workspaces": [
+                {
+                    "id": "ws-a",
+                    "name": "Alpha",
+                    "rootDir": "/alpha",
+                    "shellProfile": "pwsh",
+                    "layout": {
+                        "panes": [],
+                        "focusedPaneId": "pane-1",
+                        "splitCount": 0
+                    }
+                }
+            ]
+        }"#;
+
+        let err = WorkspaceRegistry::from_persisted_json(json).unwrap_err();
+
+        assert_eq!(err, RestoreError::EmptyWorkspaceLayout);
+    }
+
+    #[test]
+    fn persisted_state_rejects_invalid_json() {
+        let err = WorkspaceRegistry::from_persisted_json("{not-json").unwrap_err();
+
+        assert_eq!(err, RestoreError::InvalidJson);
+    }
+
+    #[test]
+    fn persisted_state_rejects_unsupported_protocol_versions() {
+        let json = r#"{
+            "protocolVersion": 7,
+            "workspaces": []
+        }"#;
+
+        let err = WorkspaceRegistry::from_persisted_json(json).unwrap_err();
+
+        assert_eq!(err, RestoreError::UnsupportedProtocolVersion);
     }
 }

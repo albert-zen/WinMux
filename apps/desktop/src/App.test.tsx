@@ -9,6 +9,7 @@ import {
   sessionRestart,
   workspaceClose,
   workspaceCreate,
+  workspaceRename,
 } from "./lib/desktopClient";
 import { PaneTerminal } from "./components/PaneTerminal";
 
@@ -23,6 +24,7 @@ vi.mock("./lib/desktopClient", () => ({
   sessionRestart: vi.fn(),
   workspaceClose: vi.fn(),
   workspaceCreate: vi.fn(),
+  workspaceRename: vi.fn(),
 }));
 
 vi.mock("./components/PaneTerminal", () => ({
@@ -583,5 +585,71 @@ describe("App terminal pane", () => {
     await waitFor(() => {
       expect(screen.getByText("close failed")).toBeTruthy();
     });
+  });
+
+  it("renames the active workspace from the desktop shell form", async () => {
+    vi.mocked(workspaceRename).mockResolvedValue();
+
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText("Rename Workspace"), {
+      target: { value: "inbox-prime" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save Workspace Name" }));
+
+    await waitFor(() => {
+      expect(workspaceRename).toHaveBeenCalledWith("ws-inbox", "inbox-prime");
+      expect(screen.getByRole("button", { name: "Open inbox-prime" })).toBeTruthy();
+    });
+  });
+
+  it("shows a rename error when workspace rename fails", async () => {
+    vi.mocked(workspaceRename).mockRejectedValue(new Error("rename failed"));
+
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText("Rename Workspace"), {
+      target: { value: "inbox-prime" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save Workspace Name" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("rename failed")).toBeTruthy();
+    });
+  });
+
+  it("prefills rename form from the active workspace and updates on switch", () => {
+    vi.mocked(useDesktopState).mockReturnValue({
+      state: {
+        protocolVersion: 1,
+        workspaces: [
+          {
+            id: "ws-inbox",
+            name: "inbox",
+            rootDir: "D:\\dev\\inbox",
+            shellProfile: "cmd.exe",
+            focusedPaneId: "pane-1",
+            panes: [{ paneId: "pane-1", sessionId: "session:1", status: "running", output: "" }],
+          },
+          {
+            id: "ws-api",
+            name: "api",
+            rootDir: "D:\\dev\\api",
+            shellProfile: "pwsh",
+            focusedPaneId: "pane-9",
+            panes: [{ paneId: "pane-9", sessionId: "session:9", status: "running", output: "" }],
+          },
+        ],
+      },
+      error: null,
+    });
+
+    render(<App />);
+
+    expect((screen.getByLabelText("Rename Workspace") as HTMLInputElement).value).toBe("inbox");
+
+    fireEvent.click(screen.getByRole("button", { name: "Open api" }));
+
+    expect((screen.getByLabelText("Rename Workspace") as HTMLInputElement).value).toBe("api");
   });
 });

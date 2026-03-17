@@ -322,6 +322,7 @@ pub fn validate_request(request: &RequestEnvelope) -> Result<(), ProtocolError> 
         "session.resize" => validate_session_resize_payload(&request.payload),
         "session.restart" => validate_session_restart_payload(&request.payload),
         "workspace.close" => validate_workspace_close_payload(&request.payload),
+        "workspace.rename" => validate_workspace_rename_payload(&request.payload),
         "session.getStatus" => validate_session_get_status_payload(&request.payload),
         "app.getState" => validate_app_get_state_payload(&request.payload),
         "notify.send" => validate_notify_payload(&request.payload),
@@ -345,6 +346,13 @@ fn validate_workspace_create_payload(payload: &Value) -> Result<(), ProtocolErro
 fn validate_workspace_close_payload(payload: &Value) -> Result<(), ProtocolError> {
     let object = payload_object(payload)?;
     required_string_field(object, "workspaceId")?;
+    Ok(())
+}
+
+fn validate_workspace_rename_payload(payload: &Value) -> Result<(), ProtocolError> {
+    let object = payload_object(payload)?;
+    required_string_field(object, "workspaceId")?;
+    required_string_field(object, "name")?;
     Ok(())
 }
 
@@ -1176,8 +1184,8 @@ mod tests {
     }
 
     #[test]
-    fn parse_and_validate_rejects_unimplemented_command_payloads_as_unsupported() {
-        let err = parse_and_validate_request(
+    fn parse_and_validate_accepts_valid_workspace_rename_requests() {
+        let request = parse_and_validate_request(
             r#"{
                 "protocolVersion": 1,
                 "id": "req_123",
@@ -1189,10 +1197,46 @@ mod tests {
                 }
             }"#,
         )
-        .expect_err("commands without validation should stay unsupported for now");
+        .expect("workspace.rename should validate");
 
-        assert_eq!(err.code, ErrorCode::Unsupported);
-        assert_eq!(err.message, "Unsupported command: workspace.rename");
+        assert_eq!(request.command(), "workspace.rename");
+    }
+
+    #[test]
+    fn parse_and_validate_rejects_workspace_rename_without_workspace_id() {
+        let err = parse_and_validate_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req_123",
+                "type": "command",
+                "command": "workspace.rename",
+                "payload": {
+                    "name": "api-renamed"
+                }
+            }"#,
+        )
+        .expect_err("workspace.rename should require workspaceId");
+
+        assert_eq!(err.code, ErrorCode::InvalidPayload);
+    }
+
+    #[test]
+    fn parse_and_validate_rejects_workspace_rename_with_blank_name() {
+        let err = parse_and_validate_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req_123",
+                "type": "command",
+                "command": "workspace.rename",
+                "payload": {
+                    "workspaceId": "ws_1",
+                    "name": "   "
+                }
+            }"#,
+        )
+        .expect_err("workspace.rename should reject blank names");
+
+        assert_eq!(err.code, ErrorCode::InvalidPayload);
     }
 
     #[test]
@@ -1269,6 +1313,7 @@ pub fn dispatch(request: &RequestEnvelope, registry: &mut WorkspaceRegistry) -> 
     match request.command() {
         "workspace.create" => handle_workspace_create(request, registry),
         "workspace.close" => handle_workspace_close(request, registry),
+        "workspace.rename" => handle_workspace_rename(request, registry),
         "pane.split" => handle_pane_split(request, registry),
         "pane.close" => handle_pane_close(request, registry),
         "pane.focus" => handle_pane_focus(request, registry),
@@ -1338,6 +1383,37 @@ fn handle_workspace_close(
                 ErrorCode::NotFound,
                 format!("Workspace not found: {workspace_id}"),
             ),
+        ),
+        Err(e) => ResponseEnvelope::error(
+            request.id(),
+            ProtocolError::new(ErrorCode::InternalError, format!("{e:?}")),
+        ),
+    }
+}
+
+fn handle_workspace_rename(
+    request: &RequestEnvelope,
+    registry: &mut WorkspaceRegistry,
+) -> ResponseEnvelope {
+    let p = request.payload();
+    let workspace_id = p["workspaceId"].as_str().unwrap_or_default();
+    let name = p["name"].as_str().unwrap_or_default();
+
+    match registry.rename_workspace(workspace_id, name) {
+        Ok(()) => ResponseEnvelope::success(
+            request.id(),
+            serde_json::json!({ "workspaceId": workspace_id }),
+        ),
+        Err(WorkspaceError::WorkspaceNotFound) => ResponseEnvelope::error(
+            request.id(),
+            ProtocolError::new(
+                ErrorCode::NotFound,
+                format!("Workspace not found: {workspace_id}"),
+            ),
+        ),
+        Err(WorkspaceError::InvalidWorkspaceName) => ResponseEnvelope::error(
+            request.id(),
+            ProtocolError::new(ErrorCode::InvalidPayload, "Invalid workspace name"),
         ),
         Err(e) => ResponseEnvelope::error(
             request.id(),
@@ -1785,6 +1861,37 @@ mod handler_tests {
         let second = dispatch(&req, &mut reg);
         assert!(!second.is_ok());
         assert_eq!(second.error().unwrap().code, ErrorCode::NotFound);
+    }
+
+    #[test]
+    fn workspace_rename_updates_name_and_returns_workspace_id() {
+        let mut reg = inbox_registry();
+        let req = RequestEnvelope::new(
+            "rr1",
+            "workspace.rename",
+            json!({ "workspaceId": "ws-inbox", "name": "Inbox Prime" }),
+        );
+
+        let resp = dispatch(&req, &mut reg);
+
+        assert!(resp.is_ok());
+        assert_eq!(resp.result().unwrap()["workspaceId"], "ws-inbox");
+        assert_eq!(reg.list()[0].name, "Inbox Prime");
+    }
+
+    #[test]
+    fn workspace_rename_returns_not_found_for_unknown_workspace() {
+        let mut reg = inbox_registry();
+        let req = RequestEnvelope::new(
+            "rr2",
+            "workspace.rename",
+            json!({ "workspaceId": "ws-missing", "name": "Inbox Prime" }),
+        );
+
+        let resp = dispatch(&req, &mut reg);
+
+        assert!(!resp.is_ok());
+        assert_eq!(resp.error().unwrap().code, ErrorCode::NotFound);
     }
 
     // ── notify.send ───────────────────────────────────────────────────────

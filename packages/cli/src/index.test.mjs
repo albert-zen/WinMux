@@ -129,6 +129,30 @@ test("workspace close requires --workspace-id", () => {
   assert.ok(r.stderr.includes("--workspace-id"), `stderr: ${r.stderr}`);
 });
 
+test("workspace rename sends request over pipe and prints response", async () => {
+  const { result, received } = await runViaPipe(
+    ["workspace", "rename", "--workspace-id", "ws-123", "--name", "backend"],
+    { ok: true },
+  );
+  assert.equal(result.status, 0, `exited ${result.status}: ${result.stderr}`);
+  const req = received[0];
+  assert.equal(req.command, "workspace.rename");
+  assert.equal(req.payload.workspaceId, "ws-123");
+  assert.equal(req.payload.name, "backend");
+});
+
+test("workspace rename requires --name", () => {
+  const r = run(["workspace", "rename", "--workspace-id", "ws-123"]);
+  assert.notEqual(r.status, 0);
+  assert.ok(r.stderr.includes("--name"), `stderr: ${r.stderr}`);
+});
+
+test("workspace rename requires --workspace-id", () => {
+  const r = run(["workspace", "rename", "--name", "backend"]);
+  assert.notEqual(r.status, 0);
+  assert.ok(r.stderr.includes("--workspace-id"), `stderr: ${r.stderr}`);
+});
+
 test("pane split sends request over pipe and prints response", async () => {
   const { result, received } = await runViaPipe(
     ["pane", "split", "--workspace-id", "ws-1", "--pane-id", "p-1",
