@@ -1733,7 +1733,7 @@ mod handler_tests {
         let resp = dispatch(&req, &mut reg);
 
         assert!(resp.is_ok());
-        assert_eq!(reg.list()[0].layout.focused_pane_id, "pane-1");
+        assert_eq!(reg.list()[0].layout.focused_pane_id(), "pane-1");
     }
 
     #[test]
@@ -1781,8 +1781,8 @@ mod handler_tests {
         let resp = dispatch(&req, &mut reg);
 
         assert!(resp.is_ok());
-        assert_eq!(reg.list()[0].layout.panes.len(), 1);
-        assert_eq!(reg.list()[0].layout.panes[0].pane_id, "pane-1");
+        assert_eq!(reg.list()[0].layout.panes().len(), 1);
+        assert_eq!(reg.list()[0].layout.panes()[0].pane_id, "pane-1");
     }
 
     // ── workspace.close ─────────────────────────────────────────────────

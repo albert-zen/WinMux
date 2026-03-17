@@ -116,7 +116,7 @@ impl WorkspaceSnapshot {
         Self {
             layout: layout.snapshot(),
             restore: RestoreSnapshot {
-                last_focused_pane_id: layout.focused_pane_id,
+                last_focused_pane_id: layout.focused_pane_id().to_string(),
             },
             scrollback: Vec::new(),
         }
@@ -160,7 +160,7 @@ impl PersistedWorkspaceRecord {
 // ── Workspace registry ───────────────────────────────────────────────────────
 
 /// A live workspace entry held in the in-memory registry.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct WorkspaceRecord {
     pub id: String,
     pub name: String,
@@ -347,7 +347,7 @@ impl WorkspaceRegistry {
             if !seen_ids.insert(ws.id.clone()) {
                 return Err(RestoreError::DuplicateWorkspaceId);
             }
-            if ws.layout.panes.is_empty() {
+            if ws.layout.is_empty() {
                 return Err(RestoreError::EmptyWorkspaceLayout);
             }
             registry.workspaces.push(WorkspaceRecord {
@@ -375,7 +375,7 @@ impl WorkspaceRecord {
             shell_profile: self.shell_profile.clone(),
             pane_count: snapshot.pane_count,
             split_count: snapshot.split_count,
-            focused_pane_id: self.layout.focused_pane_id.clone(),
+            focused_pane_id: self.layout.focused_pane_id().to_string(),
         }
     }
 }
@@ -488,7 +488,7 @@ mod tests {
         // ws-a got the split
         assert_eq!(list[0].layout.snapshot().pane_count, 2);
         assert_eq!(list[0].layout.snapshot().split_count, 1);
-        assert_eq!(list[0].layout.focused_pane_id, "pane-2");
+        assert_eq!(list[0].layout.focused_pane_id(), "pane-2");
         // ws-b is untouched
         assert_eq!(list[1].layout.snapshot().pane_count, 1);
     }
@@ -710,7 +710,7 @@ mod tests {
 
         assert_eq!(restored.list().len(), 2);
         assert_eq!(restored.list()[0].layout.snapshot().pane_count, 2);
-        assert_eq!(restored.list()[0].layout.focused_pane_id, "pane-1");
+        assert_eq!(restored.list()[0].layout.focused_pane_id(), "pane-1");
         assert_eq!(restored.list()[1].name, "Beta Prime");
     }
 
@@ -725,9 +725,8 @@ mod tests {
                     "rootDir": "/alpha",
                     "shellProfile": "pwsh",
                     "layout": {
-                        "panes": [{ "paneId": "pane-1", "sessionKind": "runningShell" }],
-                        "focusedPaneId": "pane-1",
-                        "splitCount": 0
+                        "root": { "type": "pane", "paneId": "pane-1", "sessionKind": "runningShell" },
+                        "focusedPaneId": "pane-1"
                     }
                 },
                 {
@@ -736,9 +735,8 @@ mod tests {
                     "rootDir": "/beta",
                     "shellProfile": "cmd.exe",
                     "layout": {
-                        "panes": [{ "paneId": "pane-7", "sessionKind": "freshShell" }],
-                        "focusedPaneId": "pane-7",
-                        "splitCount": 0
+                        "root": { "type": "pane", "paneId": "pane-7", "sessionKind": "freshShell" },
+                        "focusedPaneId": "pane-7"
                     }
                 }
             ]
@@ -751,6 +749,8 @@ mod tests {
 
     #[test]
     fn persisted_state_rejects_empty_workspace_layouts() {
+        // With the tree model, a layout with no root node fails to deserialize,
+        // so the old empty-panes JSON now triggers InvalidJson instead of EmptyWorkspaceLayout.
         let json = r#"{
             "protocolVersion": 1,
             "workspaces": [
@@ -770,7 +770,7 @@ mod tests {
 
         let err = WorkspaceRegistry::from_persisted_json(json).unwrap_err();
 
-        assert_eq!(err, RestoreError::EmptyWorkspaceLayout);
+        assert_eq!(err, RestoreError::InvalidJson);
     }
 
     #[test]

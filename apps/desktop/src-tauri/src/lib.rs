@@ -145,7 +145,7 @@ where
                     workspace.shell_profile.clone(),
                     workspace
                         .layout
-                        .panes
+                        .panes()
                         .iter()
                         .map(|pane| pane.pane_id.clone())
                         .collect::<Vec<_>>(),
@@ -182,7 +182,7 @@ where
             .map(|workspace| {
                 let panes = workspace
                     .layout
-                    .panes
+                    .panes()
                     .iter()
                     .map(|pane| {
                         let session_snapshot = session_snapshots
@@ -211,7 +211,7 @@ where
                     name: workspace.name.clone(),
                     root_dir: workspace.root_dir.clone(),
                     shell_profile: workspace.shell_profile.clone(),
-                    focused_pane_id: workspace.layout.focused_pane_id.clone(),
+                    focused_pane_id: workspace.layout.focused_pane_id().to_string(),
                     panes,
                 }
             })
@@ -657,7 +657,7 @@ fn rollback_split_panes(
         .map(|workspace| {
             workspace
                 .layout
-                .panes
+                .panes()
                 .iter()
                 .filter(|pane| !existing_pane_ids.contains(&pane.pane_id))
                 .map(|pane| pane.pane_id.clone())
@@ -708,7 +708,7 @@ where
 
     let shell_profile = workspace.shell_profile.clone();
     let root_dir = workspace.root_dir.clone();
-    let Some(pane_id) = workspace.layout.panes.first().map(|pane| pane.pane_id.clone()) else {
+    let Some(pane_id) = workspace.layout.panes().first().map(|pane| pane.pane_id.clone()) else {
         rollback_created_workspaces(&mut runtime.registry, &existing_workspace_ids);
         return ResponseEnvelope::error(
             request.id(),
@@ -758,7 +758,7 @@ where
         .map(|workspace| {
             workspace
                 .layout
-                .panes
+                .panes()
                 .iter()
                 .map(|pane| pane.pane_id.clone())
                 .collect::<Vec<_>>()
@@ -790,7 +790,7 @@ where
         .map(|workspace| {
             workspace
                 .layout
-                .panes
+                .panes()
                 .iter()
                 .map(|pane| pane.pane_id.clone())
                 .collect::<HashSet<_>>()
@@ -872,7 +872,7 @@ where
 
     if !workspace
         .layout
-        .panes
+        .panes()
         .iter()
         .any(|pane| pane.pane_id == pane_id)
     {
@@ -2146,8 +2146,8 @@ mod tests {
         rollback_split_panes(&mut registry, "ws-inbox", &existing_panes);
 
         let workspace = &registry.list()[0];
-        assert_eq!(workspace.layout.panes.len(), 1);
-        assert_eq!(workspace.layout.panes[0].pane_id, "pane-1");
+        assert_eq!(workspace.layout.panes().len(), 1);
+        assert_eq!(workspace.layout.panes()[0].pane_id, "pane-1");
     }
 
     #[test]
