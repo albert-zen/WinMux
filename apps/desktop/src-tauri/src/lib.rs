@@ -3,11 +3,12 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use core_events::DomainEvent;
 use core_ipc::{ErrorCode, ProtocolError, RequestEnvelope, ResponseEnvelope, ResponseExt, RuntimeContext};
+use core_layout::LayoutNode;
 use core_notify::NotificationStore;
 use core_session::{
     LiveSessionRegistry, PtySessionFactory, SessionHostFactory, SessionRuntimeError, SessionSpec,
@@ -40,7 +41,7 @@ struct RuntimeState<F> {
     active_workspace_id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PaneState {
     pane_id: String,
@@ -49,7 +50,7 @@ struct PaneState {
     output: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WorkspaceState {
     id: String,
@@ -57,10 +58,11 @@ struct WorkspaceState {
     root_dir: String,
     shell_profile: String,
     focused_pane_id: String,
-    panes: Vec<PaneState>,
+    layout: LayoutNode,
+    pane_states: HashMap<String, PaneState>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DesktopState {
     protocol_version: u32,
@@ -208,19 +210,18 @@ where
             .list()
             .iter()
             .map(|workspace| {
-                let panes = workspace
-                    .layout
-                    .panes()
-                    .iter()
-                    .map(|pane| {
-                        let session_snapshot = session_snapshots
-                            .iter()
-                            .rev()
-                            .find(|session| {
-                                session.workspace_id == workspace.id
-                                    && session.pane_id == pane.pane_id
-                            });
+                let mut pane_states = HashMap::new();
+                for pane in workspace.layout.panes() {
+                    let session_snapshot = session_snapshots
+                        .iter()
+                        .rev()
+                        .find(|session| {
+                            session.workspace_id == workspace.id
+                                && session.pane_id == pane.pane_id
+                        });
 
+                    pane_states.insert(
+                        pane.pane_id.clone(),
                         PaneState {
                             pane_id: pane.pane_id.clone(),
                             session_id: session_snapshot.map(|session| session.session_id.clone()),
@@ -230,9 +231,9 @@ where
                             output: session_snapshot
                                 .map(|session| session.output.clone())
                                 .unwrap_or_default(),
-                        }
-                    })
-                    .collect();
+                        },
+                    );
+                }
 
                 WorkspaceState {
                     id: workspace.id.clone(),
@@ -240,7 +241,8 @@ where
                     root_dir: workspace.root_dir.clone(),
                     shell_profile: workspace.shell_profile.clone(),
                     focused_pane_id: workspace.layout.focused_pane_id().to_string(),
-                    panes,
+                    layout: workspace.layout.root().clone(),
+                    pane_states,
                 }
             })
             .collect();
@@ -1428,8 +1430,8 @@ mod tests {
         let snapshot = runtime.snapshot();
 
         assert_eq!(runtime.sessions.session_id_for_pane("ws-inbox", "pane-1"), Some("session:1"));
-        assert_eq!(snapshot.workspaces[0].panes[0].session_id, Some("session:1".into()));
-        assert_eq!(snapshot.workspaces[0].panes[0].status, "running");
+        assert_eq!(snapshot.workspaces[0].pane_states["pane-1"].session_id, Some("session:1".into()));
+        assert_eq!(snapshot.workspaces[0].pane_states["pane-1"].status, "running");
     }
 
     #[test]
@@ -1761,8 +1763,8 @@ mod tests {
         assert!(!response.is_ok());
 
         let snapshot = runtime.snapshot();
-        assert_eq!(snapshot.workspaces[0].panes.len(), 1);
-        assert_eq!(snapshot.workspaces[0].panes[0].pane_id, "pane-1");
+        assert_eq!(snapshot.workspaces[0].pane_states.len(), 1);
+        assert_eq!(snapshot.workspaces[0].pane_states["pane-1"].pane_id, "pane-1");
         assert_eq!(runtime.sessions.session_id_for_pane("ws-inbox", "pane-2"), None);
     }
 
@@ -1909,7 +1911,7 @@ mod tests {
         let close_response: ResponseEnvelope = serde_json::from_str(&closed).unwrap();
         assert!(close_response.is_ok());
         assert_eq!(runtime.sessions.session_id_for_pane("ws-inbox", "pane-2"), None);
-        assert_eq!(runtime.snapshot().workspaces[0].panes.len(), 1);
+        assert_eq!(runtime.snapshot().workspaces[0].pane_states.len(), 1);
     }
 
     #[test]
@@ -1977,7 +1979,7 @@ mod tests {
 
         let snapshot = runtime.snapshot();
         assert_eq!(snapshot.workspaces[0].focused_pane_id, "pane-1");
-        assert_eq!(snapshot.workspaces[0].panes[0].pane_id, "pane-1");
+        assert_eq!(snapshot.workspaces[0].pane_states["pane-1"].pane_id, "pane-1");
     }
 
     #[test]
@@ -1999,9 +2001,9 @@ mod tests {
         assert!(response.is_ok());
         let workspace = &response.result().unwrap()["workspaces"][0];
         assert_eq!(workspace["shellProfile"], "cmd.exe");
-        assert_eq!(workspace["panes"][0]["paneId"], "pane-1");
-        assert_eq!(workspace["panes"][0]["status"], "running");
-        assert_eq!(workspace["panes"][0]["sessionId"], "session:1");
+        assert_eq!(workspace["paneStates"]["pane-1"]["paneId"], "pane-1");
+        assert_eq!(workspace["paneStates"]["pane-1"]["status"], "running");
+        assert_eq!(workspace["paneStates"]["pane-1"]["sessionId"], "session:1");
     }
 
     #[test]
@@ -2032,9 +2034,9 @@ mod tests {
         assert!(send_response.is_ok());
 
         let snapshot = runtime.snapshot();
-        assert_eq!(snapshot.workspaces[0].panes[0].status, "exited");
+        assert_eq!(snapshot.workspaces[0].pane_states["pane-1"].status, "exited");
         assert_eq!(
-            snapshot.workspaces[0].panes[0].session_id,
+            snapshot.workspaces[0].pane_states["pane-1"].session_id,
             Some("session:1".to_string())
         );
     }
@@ -2534,8 +2536,8 @@ mod tests {
 
         assert_eq!(snapshot.workspaces.len(), 1);
         assert_eq!(snapshot.workspaces[0].name, "Inbox Prime");
-        assert_eq!(snapshot.workspaces[0].panes.len(), 2);
-        assert!(snapshot.workspaces[0].panes.iter().all(|pane| pane.session_id.is_some()));
+        assert_eq!(snapshot.workspaces[0].pane_states.len(), 2);
+        assert!(snapshot.workspaces[0].pane_states.values().all(|pane| pane.session_id.is_some()));
 
         let _ = fs::remove_file(state_path);
     }

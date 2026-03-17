@@ -51,10 +51,17 @@ export function useDesktopState(): UseDesktopStateResult {
               if (ws.id !== workspaceId) return ws;
               return {
                 ...ws,
-                panes: ws.panes.map((pane) => {
-                  if (pane.paneId !== paneId || pane.sessionId !== sessionId) return pane;
-                  return { ...pane, output: resetTerminal ? chunk : pane.output + chunk };
-                }),
+                paneStates: {
+                  ...ws.paneStates,
+                  ...(ws.paneStates[paneId]?.sessionId === sessionId
+                    ? {
+                        [paneId]: {
+                          ...ws.paneStates[paneId],
+                          output: resetTerminal ? chunk : ws.paneStates[paneId].output + chunk,
+                        },
+                      }
+                    : {}),
+                },
               };
             }),
           };

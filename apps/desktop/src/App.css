@@ -210,17 +210,19 @@ input {
   cursor: pointer;
 }
 
+.toolbar-buttons {
+  display: flex;
+  gap: 8px;
+}
+
 .secondary-button {
   background: #2f2924;
   border: 1px solid #443a32;
 }
 
 .workspace-split-view {
-  display: grid;
   min-height: 420px;
-  align-items: stretch;
   height: 100%;
-  grid-template-columns: var(--split-columns);
 }
 
 .split-pane {
@@ -232,10 +234,6 @@ input {
   border-radius: 10px;
   background: #201c19;
   border: 1px solid #342d27;
-}
-
-.split-pane + .split-pane {
-  border-left: 0;
 }
 
 .split-pane-focused {
@@ -318,6 +316,22 @@ input {
 
 .split-handle:hover {
   background: #5a4738;
+}
+
+.split-handle-horizontal {
+  width: auto;
+  height: 4px;
+  cursor: row-resize;
+}
+
+.split-node-vertical {
+  min-width: 0;
+  min-height: 0;
+}
+
+.split-node-horizontal {
+  min-width: 0;
+  min-height: 0;
 }
 
 .pane-terminal-surface {
@@ -531,13 +545,7 @@ input {
   }
 
   .workspace-split-view {
-    grid-auto-flow: row;
-    grid-template-columns: 1fr;
-    grid-auto-rows: minmax(220px, 1fr);
-  }
-
-  .split-handle {
-    display: none;
+    min-height: auto;
   }
 
   .header-meta {

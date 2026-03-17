@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { PaneState } from "@cmux-win/protocol";
+import type { ActiveThemeState, PaneState } from "@cmux-win/protocol";
 import { createTerminalAdapter, type TerminalAdapter } from "../lib/terminalAdapter";
 import { sessionResize, sessionSendInput } from "../lib/desktopClient";
 import "@xterm/xterm/css/xterm.css";
@@ -7,9 +7,10 @@ import "@xterm/xterm/css/xterm.css";
 interface Props {
   pane: PaneState;
   isFocused: boolean;
+  theme?: ActiveThemeState;
 }
 
-export function PaneTerminal({ pane, isFocused }: Props) {
+export function PaneTerminal({ pane, isFocused, theme }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const liveSessionRef = useRef({
     sessionId: pane.sessionId,
@@ -31,7 +32,7 @@ export function PaneTerminal({ pane, isFocused }: Props) {
       return;
     }
 
-    const terminal = createTerminalAdapter(container);
+    const terminal = createTerminalAdapter(container, theme);
     terminalRef.current = terminal;
     terminal.write(pane.output);
     outputRef.current = pane.output;
@@ -88,7 +89,15 @@ export function PaneTerminal({ pane, isFocused }: Props) {
       terminal.dispose();
       terminalRef.current = null;
     };
-  }, [pane.sessionId]);
+  }, [pane.sessionId, theme]);
+
+  // Update theme when it changes (without recreating terminal)
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (terminal && theme) {
+      terminal.updateTheme(theme);
+    }
+  }, [theme]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -119,7 +128,7 @@ export function PaneTerminal({ pane, isFocused }: Props) {
 
   const overlayMessage =
     pane.status === "exited"
-      ? "Session exited \u2014 press Restart"
+      ? "Session exited — press Restart"
       : pane.status === "none"
         ? "No session"
         : null;

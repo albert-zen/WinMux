@@ -66,14 +66,15 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\inbox",
             shellProfile: "cmd.exe",
             focusedPaneId: "pane-1",
-            panes: [
-              {
+            layout: { type: "pane", paneId: "pane-1", sessionKind: "runningShell" },
+            paneStates: {
+              "pane-1": {
                 paneId: "pane-1",
                 sessionId: "session:1",
                 status: "running",
                 output: "hello from pane-1",
               },
-            ],
+            },
           },
         ],
       },
@@ -121,14 +122,15 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\inbox",
             shellProfile: "cmd.exe",
             focusedPaneId: "pane-1",
-            panes: [
-              {
+            layout: { type: "pane", paneId: "pane-1", sessionKind: "runningShell" },
+            paneStates: {
+              "pane-1": {
                 paneId: "pane-1",
                 sessionId: "session:1",
                 status: "exited",
                 output: "process exited",
               },
-            ],
+            },
           },
         ],
       },
@@ -169,20 +171,27 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\inbox",
             shellProfile: "cmd.exe",
             focusedPaneId: "pane-1",
-            panes: [
-              {
+            layout: {
+              type: "split",
+              orientation: "vertical",
+              ratio: 0.5,
+              first: { type: "pane", paneId: "pane-1", sessionKind: "runningShell" },
+              second: { type: "pane", paneId: "pane-2", sessionKind: "freshShell" },
+            },
+            paneStates: {
+              "pane-1": {
                 paneId: "pane-1",
                 sessionId: "session:1",
                 status: "running",
                 output: "one",
               },
-              {
+              "pane-2": {
                 paneId: "pane-2",
                 sessionId: "session:2",
                 status: "running",
                 output: "two",
               },
-            ],
+            },
           },
         ],
       },
@@ -216,20 +225,27 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\inbox",
             shellProfile: "cmd.exe",
             focusedPaneId: "pane-1",
-            panes: [
-              {
+            layout: {
+              type: "split",
+              orientation: "vertical",
+              ratio: 0.5,
+              first: { type: "pane", paneId: "pane-1", sessionKind: "runningShell" },
+              second: { type: "pane", paneId: "pane-2", sessionKind: "freshShell" },
+            },
+            paneStates: {
+              "pane-1": {
                 paneId: "pane-1",
                 sessionId: "session:1",
                 status: "running",
                 output: "one",
               },
-              {
+              "pane-2": {
                 paneId: "pane-2",
                 sessionId: "session:2",
                 status: "running",
                 output: "two",
               },
-            ],
+            },
           },
         ],
       },
@@ -263,20 +279,27 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\inbox",
             shellProfile: "cmd.exe",
             focusedPaneId: "pane-1",
-            panes: [
-              {
+            layout: {
+              type: "split",
+              orientation: "vertical",
+              ratio: 0.5,
+              first: { type: "pane", paneId: "pane-1", sessionKind: "runningShell" },
+              second: { type: "pane", paneId: "pane-2", sessionKind: "freshShell" },
+            },
+            paneStates: {
+              "pane-1": {
                 paneId: "pane-1",
                 sessionId: "session:1",
                 status: "running",
                 output: "one",
               },
-              {
+              "pane-2": {
                 paneId: "pane-2",
                 sessionId: "session:2",
                 status: "running",
                 output: "two",
               },
-            ],
+            },
           },
         ],
       },
@@ -310,14 +333,15 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\inbox",
             shellProfile: "cmd.exe",
             focusedPaneId: "pane-1",
-            panes: [
-              {
+            layout: { type: "pane", paneId: "pane-1", sessionKind: "runningShell" },
+            paneStates: {
+              "pane-1": {
                 paneId: "pane-1",
                 sessionId: "session:1",
                 status: "running",
                 output: "one",
               },
-            ],
+            },
           },
         ],
       },
@@ -354,14 +378,15 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\inbox",
             shellProfile: "cmd.exe",
             focusedPaneId: "pane-1",
-            panes: [
-              {
+            layout: { type: "pane", paneId: "pane-1", sessionKind: "runningShell" },
+            paneStates: {
+              "pane-1": {
                 paneId: "pane-1",
                 sessionId: "session:1",
                 status: "running",
                 output: "one",
               },
-            ],
+            },
           },
           {
             id: "ws-api",
@@ -369,14 +394,15 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\api",
             shellProfile: "pwsh",
             focusedPaneId: "pane-9",
-            panes: [
-              {
+            layout: { type: "pane", paneId: "pane-9", sessionKind: "runningShell" },
+            paneStates: {
+              "pane-9": {
                 paneId: "pane-9",
                 sessionId: "session:9",
                 status: "running",
                 output: "api",
               },
-            ],
+            },
           },
         ],
       },
@@ -412,14 +438,15 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\inbox",
             shellProfile: "cmd.exe",
             focusedPaneId: "pane-stale",
-            panes: [
-              {
+            layout: { type: "pane", paneId: "pane-1", sessionKind: "runningShell" },
+            paneStates: {
+              "pane-1": {
                 paneId: "pane-1",
                 sessionId: "session:1",
                 status: "running",
                 output: "one",
               },
-            ],
+            },
           },
         ],
       },
@@ -510,14 +537,15 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\inbox",
             shellProfile: "cmd.exe",
             focusedPaneId: "pane-1",
-            panes: [
-              {
+            layout: { type: "pane", paneId: "pane-1", sessionKind: "runningShell" },
+            paneStates: {
+              "pane-1": {
                 paneId: "pane-1",
                 sessionId: "session:1",
                 status: "running",
                 output: "one",
               },
-            ],
+            },
           },
           {
             id: "ws-new",
@@ -525,14 +553,15 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\backend",
             shellProfile: "pwsh",
             focusedPaneId: "pane-7",
-            panes: [
-              {
+            layout: { type: "pane", paneId: "pane-7", sessionKind: "runningShell" },
+            paneStates: {
+              "pane-7": {
                 paneId: "pane-7",
                 sessionId: "session:real",
                 status: "running",
                 output: "backend ready",
               },
-            ],
+            },
           },
         ],
       },
@@ -585,7 +614,10 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\inbox",
             shellProfile: "cmd.exe",
             focusedPaneId: "pane-1",
-            panes: [{ paneId: "pane-1", sessionId: "session:1", status: "running", output: "" }],
+            layout: { type: "pane", paneId: "pane-1", sessionKind: "runningShell" },
+            paneStates: {
+              "pane-1": { paneId: "pane-1", sessionId: "session:1", status: "running", output: "" },
+            },
           },
           {
             id: "ws-api",
@@ -593,7 +625,10 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\api",
             shellProfile: "pwsh",
             focusedPaneId: "pane-9",
-            panes: [{ paneId: "pane-9", sessionId: "session:9", status: "running", output: "" }],
+            layout: { type: "pane", paneId: "pane-9", sessionKind: "runningShell" },
+            paneStates: {
+              "pane-9": { paneId: "pane-9", sessionId: "session:9", status: "running", output: "" },
+            },
           },
         ],
       },
@@ -628,7 +663,10 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\inbox",
             shellProfile: "cmd.exe",
             focusedPaneId: "pane-1",
-            panes: [{ paneId: "pane-1", sessionId: "session:1", status: "running", output: "" }],
+            layout: { type: "pane", paneId: "pane-1", sessionKind: "runningShell" },
+            paneStates: {
+              "pane-1": { paneId: "pane-1", sessionId: "session:1", status: "running", output: "" },
+            },
           },
           {
             id: "ws-api",
@@ -636,7 +674,10 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\api",
             shellProfile: "pwsh",
             focusedPaneId: "pane-9",
-            panes: [{ paneId: "pane-9", sessionId: "session:9", status: "running", output: "" }],
+            layout: { type: "pane", paneId: "pane-9", sessionKind: "runningShell" },
+            paneStates: {
+              "pane-9": { paneId: "pane-9", sessionId: "session:9", status: "running", output: "" },
+            },
           },
         ],
       },
@@ -684,7 +725,10 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\inbox",
             shellProfile: "cmd.exe",
             focusedPaneId: "pane-1",
-            panes: [{ paneId: "pane-1", sessionId: "session:1", status: "running", output: "" }],
+            layout: { type: "pane", paneId: "pane-1", sessionKind: "runningShell" },
+            paneStates: {
+              "pane-1": { paneId: "pane-1", sessionId: "session:1", status: "running", output: "" },
+            },
           },
           {
             id: "ws-api",
@@ -692,7 +736,10 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\api",
             shellProfile: "pwsh",
             focusedPaneId: "pane-9",
-            panes: [{ paneId: "pane-9", sessionId: "session:9", status: "running", output: "" }],
+            layout: { type: "pane", paneId: "pane-9", sessionKind: "runningShell" },
+            paneStates: {
+              "pane-9": { paneId: "pane-9", sessionId: "session:9", status: "running", output: "" },
+            },
           },
         ],
       },
@@ -760,7 +807,10 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\inbox",
             shellProfile: "cmd.exe",
             focusedPaneId: "pane-1",
-            panes: [{ paneId: "pane-1", sessionId: "session:1", status: "running", output: "" }],
+            layout: { type: "pane", paneId: "pane-1", sessionKind: "runningShell" },
+            paneStates: {
+              "pane-1": { paneId: "pane-1", sessionId: "session:1", status: "running", output: "" },
+            },
           },
           {
             id: "ws-api",
@@ -768,7 +818,10 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\api",
             shellProfile: "pwsh",
             focusedPaneId: "pane-9",
-            panes: [{ paneId: "pane-9", sessionId: "session:9", status: "running", output: "" }],
+            layout: { type: "pane", paneId: "pane-9", sessionKind: "runningShell" },
+            paneStates: {
+              "pane-9": { paneId: "pane-9", sessionId: "session:9", status: "running", output: "" },
+            },
           },
         ],
       },
@@ -845,14 +898,15 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\inbox",
             shellProfile: "cmd.exe",
             focusedPaneId: "pane-1",
-            panes: [
-              {
+            layout: { type: "pane", paneId: "pane-1", sessionKind: "runningShell" },
+            paneStates: {
+              "pane-1": {
                 paneId: "pane-1",
                 sessionId: "session:1",
                 status: "exited",
                 output: "process exited",
               },
-            ],
+            },
           },
         ],
       },
@@ -889,20 +943,27 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\inbox",
             shellProfile: "cmd.exe",
             focusedPaneId: "pane-1",
-            panes: [
-              {
+            layout: {
+              type: "split",
+              orientation: "vertical",
+              ratio: 0.5,
+              first: { type: "pane", paneId: "pane-1", sessionKind: "runningShell" },
+              second: { type: "pane", paneId: "pane-2", sessionKind: "freshShell" },
+            },
+            paneStates: {
+              "pane-1": {
                 paneId: "pane-1",
                 sessionId: "session:1",
                 status: "running",
                 output: "one",
               },
-              {
+              "pane-2": {
                 paneId: "pane-2",
                 sessionId: "session:2",
                 status: "running",
                 output: "two",
               },
-            ],
+            },
           },
         ],
       },
@@ -939,7 +1000,10 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\inbox",
             shellProfile: "cmd.exe",
             focusedPaneId: "pane-1",
-            panes: [{ paneId: "pane-1", sessionId: "session:1", status: "running", output: "" }],
+            layout: { type: "pane", paneId: "pane-1", sessionKind: "runningShell" },
+            paneStates: {
+              "pane-1": { paneId: "pane-1", sessionId: "session:1", status: "running", output: "" },
+            },
           },
           {
             id: "ws-api",
@@ -947,7 +1011,10 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\api",
             shellProfile: "pwsh",
             focusedPaneId: "pane-9",
-            panes: [{ paneId: "pane-9", sessionId: "session:9", status: "running", output: "" }],
+            layout: { type: "pane", paneId: "pane-9", sessionKind: "runningShell" },
+            paneStates: {
+              "pane-9": { paneId: "pane-9", sessionId: "session:9", status: "running", output: "" },
+            },
           },
         ],
       },
@@ -979,7 +1046,10 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\inbox",
             shellProfile: "cmd.exe",
             focusedPaneId: "pane-1",
-            panes: [{ paneId: "pane-1", sessionId: "session:1", status: "running", output: "" }],
+            layout: { type: "pane", paneId: "pane-1", sessionKind: "runningShell" },
+            paneStates: {
+              "pane-1": { paneId: "pane-1", sessionId: "session:1", status: "running", output: "" },
+            },
           },
           {
             id: "ws-api",
@@ -987,7 +1057,10 @@ describe("App terminal pane", () => {
             rootDir: "D:\\dev\\api",
             shellProfile: "pwsh",
             focusedPaneId: "pane-9",
-            panes: [{ paneId: "pane-9", sessionId: "session:9", status: "running", output: "" }],
+            layout: { type: "pane", paneId: "pane-9", sessionKind: "runningShell" },
+            paneStates: {
+              "pane-9": { paneId: "pane-9", sessionId: "session:9", status: "running", output: "" },
+            },
           },
         ],
       },

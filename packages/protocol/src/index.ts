@@ -46,6 +46,18 @@ export type WorkspaceSummary = {
 
 export type PaneStatus = "starting" | "running" | "exited" | "none";
 
+export type SessionKind = "runningShell" | "freshShell";
+
+export type LayoutNode =
+  | { type: "pane"; paneId: string; sessionKind: SessionKind }
+  | {
+      type: "split";
+      orientation: "vertical" | "horizontal";
+      ratio: number;
+      first: LayoutNode;
+      second: LayoutNode;
+    };
+
 export type PaneState = {
   paneId: string;
   sessionId: string | null;
@@ -59,8 +71,23 @@ export type WorkspaceState = {
   rootDir: string;
   shellProfile: string;
   focusedPaneId: string;
-  panes: PaneState[];
+  layout: LayoutNode;
+  paneStates: Record<string, PaneState>;
 };
+
+export function collectPaneIds(node: LayoutNode): string[] {
+  if (node.type === "pane") {
+    return [node.paneId];
+  }
+  return [...collectPaneIds(node.first), ...collectPaneIds(node.second)];
+}
+
+export function paneCount(node: LayoutNode): number {
+  if (node.type === "pane") {
+    return 1;
+  }
+  return paneCount(node.first) + paneCount(node.second);
+}
 
 export type ActiveThemeState = {
   id: string;

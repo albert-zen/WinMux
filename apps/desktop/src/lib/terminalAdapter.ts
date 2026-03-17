@@ -1,5 +1,6 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
+import type { ActiveThemeState } from "@cmux-win/protocol";
 
 export interface TerminalAdapter {
   dispose(): void;
@@ -8,21 +9,37 @@ export interface TerminalAdapter {
   reset(): void;
   syncSize(): { cols: number; rows: number } | null;
   write(data: string): void;
+  updateTheme(theme: ActiveThemeState): void;
 }
 
-export function createTerminalAdapter(container: HTMLElement): TerminalAdapter {
+function toXtermTheme(theme: ActiveThemeState): Record<string, string> {
+  return {
+    background: theme.background,
+    foreground: theme.foreground,
+    cursor: theme.cursor,
+    cursorAccent: theme.background,
+    selectionBackground: theme.selection,
+  };
+}
+
+export function createTerminalAdapter(
+  container: HTMLElement,
+  theme?: ActiveThemeState,
+): TerminalAdapter {
+  const xtermTheme = theme ? toXtermTheme(theme) : {
+    background: "#11100f",
+    foreground: "#f1ede8",
+    cursor: "#f6efe7",
+    cursorAccent: "#11100f",
+    selectionBackground: "#3b322b",
+  };
+
   const terminal = new Terminal({
     convertEol: false,
     cursorBlink: true,
     fontFamily: '"Cascadia Code", "Consolas", monospace',
     fontSize: 14,
-    theme: {
-      background: "#11100f",
-      foreground: "#f1ede8",
-      cursor: "#f6efe7",
-      cursorAccent: "#11100f",
-      selectionBackground: "#3b322b",
-    },
+    theme: xtermTheme,
   });
   const fitAddon = new FitAddon();
 
@@ -62,6 +79,9 @@ export function createTerminalAdapter(container: HTMLElement): TerminalAdapter {
     },
     write(data) {
       terminal.write(data);
+    },
+    updateTheme(newTheme) {
+      terminal.options.theme = toXtermTheme(newTheme);
     },
   };
 }

@@ -116,14 +116,15 @@ describe("useDesktopState", () => {
           rootDir: "D:\\dev\\inbox",
           shellProfile: "cmd.exe",
           focusedPaneId: "pane-1",
-          panes: [
-            {
+          layout: { type: "pane", paneId: "pane-1", sessionKind: "runningShell" },
+          paneStates: {
+            "pane-1": {
               paneId: "pane-1",
               sessionId: "session:1",
               status: "running",
               output: "hello",
             },
-          ],
+          },
         },
       ],
     });
@@ -174,14 +175,15 @@ describe("useDesktopState", () => {
           rootDir: "D:\\dev\\inbox",
           shellProfile: "cmd.exe",
           focusedPaneId: "pane-1",
-          panes: [
-            {
+          layout: { type: "pane", paneId: "pane-1", sessionKind: "runningShell" },
+          paneStates: {
+            "pane-1": {
               paneId: "pane-1",
               sessionId: "session:2",
               status: "running",
               output: "fresh",
             },
-          ],
+          },
         },
       ],
     });
@@ -233,14 +235,15 @@ describe("useDesktopState", () => {
           rootDir: "D:\\dev\\inbox",
           shellProfile: "cmd.exe",
           focusedPaneId: "pane-1",
-          panes: [
-            {
+          layout: { type: "pane", paneId: "pane-1", sessionKind: "runningShell" },
+          paneStates: {
+            "pane-1": {
               paneId: "pane-1",
               sessionId: "session:1",
               status: "running",
               output: "old-output",
             },
-          ],
+          },
         },
       ],
     });
@@ -285,14 +288,15 @@ describe("useDesktopState", () => {
             rootDir: "D:\\dev\\inbox",
             shellProfile: "cmd.exe",
             focusedPaneId: "pane-1",
-            panes: [
-              {
+            layout: { type: "pane", paneId: "pane-1", sessionKind: "runningShell" },
+            paneStates: {
+              "pane-1": {
                 paneId: "pane-1",
                 sessionId: "session:1",
                 status: "running",
                 output: "",
               },
-            ],
+            },
           },
         ],
       };

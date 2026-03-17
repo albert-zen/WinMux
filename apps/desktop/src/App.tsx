@@ -1,6 +1,7 @@
-import { APP_NAME, type WorkspaceState } from "@cmux-win/protocol";
-import { useEffect, useState } from "react";
+import { APP_NAME, paneCount, type WorkspaceState } from "@cmux-win/protocol";
+import { useEffect, useState, useCallback } from "react";
 import { useDesktopState } from "./hooks/useDesktopState";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import {
   paneSplit,
   sessionRestart,
@@ -141,14 +142,15 @@ function App() {
         rootDir,
         shellProfile,
         focusedPaneId: result.paneId,
-        panes: [
-          {
+        layout: { type: "pane", paneId: result.paneId, sessionKind: "freshShell" },
+        paneStates: {
+          [result.paneId]: {
             paneId: result.paneId,
             sessionId: result.sessionId,
             status: "starting",
             output: "",
           },
-        ],
+        },
       });
       setActiveWorkspaceId(result.workspaceId);
       setCreateForm((prev) => ({
@@ -160,16 +162,14 @@ function App() {
     }
   };
 
-  const handleSplit = () => {
-    const focusedPane = workspace?.panes.find(
-      (pane) => pane.paneId === workspace.focusedPaneId
-    ) ?? null;
+  const handleSplit = (direction: "vertical" | "horizontal" = "vertical") => {
+    const focusedPane = workspace?.paneStates[workspace.focusedPaneId] ?? null;
     if (!workspace || !focusedPane) {
       return;
     }
 
     setSplitError(null);
-    paneSplit(workspace.id, focusedPane.paneId, "vertical").catch((reason) => {
+    paneSplit(workspace.id, focusedPane.paneId, direction).catch((reason) => {
       setSplitError(reason instanceof Error ? reason.message : String(reason));
     });
   };
@@ -213,7 +213,7 @@ function App() {
   };
 
   const handleRestartPane = (paneId: string) => {
-    const pane = workspace?.panes.find((entry) => entry.paneId === paneId) ?? null;
+    const pane = workspace?.paneStates[paneId] ?? null;
     if (!pane?.sessionId) {
       return;
     }
@@ -245,6 +245,26 @@ function App() {
   useEffect(() => {
     setBannerDismissed(false);
   }, [error]);
+
+  // Keyboard shortcuts
+  const handleSplitVertical = useCallback(() => {
+    handleSplit("vertical");
+  }, [workspace]);
+
+  const handleSplitHorizontal = useCallback(() => {
+    handleSplit("horizontal");
+  }, [workspace]);
+
+  useKeyboardShortcuts({
+    workspace: workspace
+      ? {
+          id: workspace.id,
+          focusedPaneId: workspace.focusedPaneId,
+        }
+      : null,
+    onSplitVertical: handleSplitVertical,
+    onSplitHorizontal: handleSplitHorizontal,
+  });
 
   return (
     <main className="app-shell">
@@ -292,7 +312,7 @@ function App() {
                       onClick={() => handleWorkspaceSelect(entry.id)}
                     >
                       <span>{entry.name}</span>
-                      <small>{entry.panes.length} panes</small>
+                      <small>{paneCount(entry.layout)} panes</small>
                     </button>
                     <button
                       type="button"
@@ -386,11 +406,16 @@ function App() {
             <div className="workspace-toolbar">
               <div>
                 <strong>{workspace.rootDir}</strong>
-                <span>{workspace.panes.length} panes</span>
+                <span>{paneCount(workspace.layout)} panes</span>
               </div>
-              <button type="button" onClick={handleSplit}>
-                Split Right
-              </button>
+              <div className="toolbar-buttons">
+                <button type="button" onClick={() => handleSplit("vertical")}>
+                  Split Right
+                </button>
+                <button type="button" onClick={() => handleSplit("horizontal")}>
+                  Split Down
+                </button>
+              </div>
             </div>
 
             {splitError ? (
@@ -411,6 +436,7 @@ function App() {
 
             <WorkspaceSplitView
               workspace={workspace}
+              activeTheme={state?.activeTheme}
               onFocusPane={handleFocus}
               onClosePane={handleClose}
               onRestartPane={handleRestartPane}
