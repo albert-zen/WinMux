@@ -162,9 +162,10 @@ Each pane stores:
 
 Current implementation note:
 
-- The long-term architecture is still a recursive split tree owned by Rust.
-- The current desktop UI already renders draggable split panes, but it does so over a linear pane list.
-- Treat that UI layout layer as an interim rendering model, not as proof that the split-tree persistence model is finished.
+- The backend layout model in `core-layout` is currently a flat `Vec<PaneSlot>` with a focused pane ID, not a recursive tree.
+- The desktop UI renders draggable split panes over this linear list, with ratios managed in the UI layer.
+- The long-term architecture target is a recursive split tree owned by Rust, replacing the current flat model.
+- Pane width ratios are not yet part of authoritative persisted state.
 
 ### Terminal Session
 
@@ -207,9 +208,10 @@ This keeps commands deterministic and testable.
 Current implementation note:
 
 - Terminal output is already evented through the desktop bridge as `session-output`.
-- The logical IPC event name remains `session.output`; the rename exists only because Tauri event names cannot contain `.`.
+- The logical IPC event name remains `session.output`; the Tauri desktop bridge emits `session-output` because Tauri event names cannot contain `.`.
 - Desktop metadata still uses hybrid polling via `desktop_state` as a fallback.
-- Pane width ratios are currently maintained in the UI layer and are not yet part of authoritative restored state.
+- Pane width ratios are maintained in the UI layer and are not yet part of authoritative persisted state.
+- Persistence currently uses local JSON (`state.json`), not SQLite. SQLite remains the long-term target.
 
 ## Persistence Model
 
@@ -279,25 +281,23 @@ Scope for v0.1:
 
 Do not couple update logic to workspace/session logic.
 
-## Recommended Repository Shape
+## Repository Shape
 
 ```text
 cmux-win/
   apps/
-    desktop/
+    desktop/          # Tauri 2 app (src-tauri/ for Rust, src/ for React)
   crates/
-    core-state/
-    core-layout/
-    core-session/
-    core-pty/
-    core-ipc/
-    core-notify/
-    core-theme/
-  packages/
-    ui/
-    protocol/
-    cli/
+    core-state/       # Workspace registry, persistence
+    core-layout/      # Pane layout model
+    core-session/     # Session lifecycle, PTY integration
+    core-pty/         # ConPTY host, output buffering
+    core-ipc/         # Protocol types, validation, dispatch
+    core-events/      # Event types (stub)
+    core-notify/      # Notification pipeline (stub)
+    core-theme/       # Theme registry (stub)
   docs/
+  scripts/
 ```
 
 ## Architecture Decisions

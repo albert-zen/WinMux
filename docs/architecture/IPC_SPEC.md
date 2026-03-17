@@ -82,16 +82,15 @@ Event envelope:
 }
 ```
 
-## Command Set v0.1
+## Implemented Commands
+
+These commands are validated and dispatched by `core-ipc`:
 
 ### Workspace Commands
 
 - `workspace.create`
-- `workspace.list`
-- `workspace.get`
-- `workspace.rename`
 - `workspace.close`
-- `workspace.focus`
+- `workspace.rename`
 
 Example create payload:
 
@@ -108,7 +107,6 @@ Example create payload:
 - `pane.split`
 - `pane.close`
 - `pane.focus`
-- `pane.resize`
 
 Example split payload:
 
@@ -123,21 +121,17 @@ Example split payload:
 
 ### Session Commands
 
+These are validated by `core-ipc` but dispatched at the desktop runtime layer, not in the core dispatch loop:
+
+- `session.start`
 - `session.sendInput`
 - `session.resize`
 - `session.restart`
 - `session.getStatus`
 
-### Theme Commands
-
-- `theme.list`
-- `theme.apply`
-- `theme.import`
-
 ### Notification Commands
 
-- `notify.send`
-- `notify.listRecent`
+- `notify.send` (validated and accepted; no-op in core dispatch)
 
 Example notify payload:
 
@@ -152,7 +146,32 @@ Example notify payload:
 
 ### App Commands
 
-- `app.getState`
+- `app.getState` (validated; handled at desktop runtime layer)
+
+## Planned Commands (Not Yet Implemented)
+
+### Workspace
+
+- `workspace.list`
+- `workspace.get`
+- `workspace.focus`
+
+### Pane
+
+- `pane.resize`
+
+### Theme
+
+- `theme.list`
+- `theme.apply`
+- `theme.import`
+
+### Notification
+
+- `notify.listRecent`
+
+### App
+
 - `app.subscribe`
 - `app.unsubscribe`
 - `app.checkForUpdates`

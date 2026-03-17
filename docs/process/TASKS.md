@@ -126,13 +126,15 @@ Scope:
 
 Deliverables:
 
-- `cmux-win` CLI binary
+- `cmux-win` CLI binary (bundled with the desktop app, not a separate package)
 - Thin mapping to IPC
 
 Current status:
 
-- workspace create/close/rename, pane split, session commands, and notify flow already round-trip over named pipe
+- no standalone CLI binary exists yet
+- workspace create/close/rename, pane split, session commands, and notify flow already round-trip over the named pipe from the desktop runtime
 - workspace list/switch and fuller pane-management parity remain
+- CLI will be a thin wrapper connecting to the same named pipe server
 
 Suggested tests:
 
@@ -300,10 +302,10 @@ Dependencies:
 
 ## Recommended Order From Current State
 
-1. Finish Package E workspace commands and Package F workspace switcher together
-2. Upgrade Package B from linear pane list semantics to a real split tree
-3. Build Package I restore on top of that authoritative layout model
-4. Continue Package G and H after workspace switching is stable
+1. Upgrade Package B from linear pane list to a real split tree (architectural blocker)
+2. Harden Package I restore on top of that authoritative layout model
+3. Build Package E CLI binary as a thin named-pipe client
+4. Continue Package G and H after workspace switching and restore are stable
 
 ## Coding Rules For Subagents
 
