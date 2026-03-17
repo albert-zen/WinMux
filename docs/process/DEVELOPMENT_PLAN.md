@@ -22,9 +22,12 @@ As of the latest integration work, the project already has:
 - named-pipe transport between CLI and desktop backend
 - auto-started sessions for starter workspace, `workspace.create`, and `pane.split`
 - a desktop UI that can:
-  - show starter workspace panes
-  - send input
+  - render xterm.js terminal panes
+  - stream session output events into the terminal surface
   - split the focused pane
+  - focus and close panes
+  - resize panes through a draggable split layout
+  - preserve split ratios across pane split/close/rerender
   - restart exited sessions
 - `session.output` event streaming from desktop backend to frontend hook
 - polling fallback through `desktop_state`
@@ -32,8 +35,8 @@ As of the latest integration work, the project already has:
 What this means in practice:
 
 - the backend path is real
-- the app is now a working terminal demo
-- the remaining gaps are mostly UI ergonomics, layout fidelity, restore behavior, and hardening
+- the app is now a working multi-pane terminal demo
+- the remaining gaps are workspace management, true layout persistence, restore behavior, and hardening
 
 ## Definition Of "Usable"
 
@@ -55,6 +58,8 @@ This does not yet require:
 ## Immediate Priorities
 
 ### Slice 1: Replace `pre` Output With xterm.js
+
+Status: completed
 
 Why this is next:
 
@@ -83,23 +88,27 @@ Required tests:
 
 ### Slice 2: Real Split-Pane Layout And Focus
 
-Why this is next:
+Status: partially completed
 
-- The backend already knows about pane identity and focus.
-- The current card grid is good enough for proving flow, but not for actual use.
+What has landed:
 
-Scope:
+- The card grid was replaced with a draggable split-pane desktop layout.
+- Pane focus and close actions work end-to-end.
+- Terminal resize is wired through the existing `session.resize` path.
+- Pane widths are preserved across ordinary rerenders plus pane add/remove cases.
 
-- Replace the simple pane grid with a real split layout.
-- Show focused pane state clearly.
-- Add pane focus switching from UI interaction.
-- Wire terminal resize events to `session.resize`.
+What remains in this slice:
+
+- Move from a linear UI-only split model to a backend-backed split tree.
+- Persist or restore pane ratios across app relaunch and workspace restore.
+- Add keyboard-driven pane navigation once workspace chrome exists.
 
 Exit criteria:
 
-- Split panes visually reflect workspace structure.
+- Split panes visually reflect authoritative workspace structure.
 - Focusing a pane updates both UI state and terminal input target.
 - Resizing a pane triggers session resize with stable dimensions.
+- Ratio behavior stays predictable across pane lifecycle changes.
 
 Required tests:
 
@@ -110,6 +119,8 @@ Required tests:
 
 ### Slice 3: Workspace And Pane Management Loop
 
+Status: in progress
+
 Why this is next:
 
 - The current demo mostly lives inside the starter workspace.
@@ -118,7 +129,7 @@ Why this is next:
 Scope:
 
 - Add workspace create/list/switch in the desktop shell.
-- Add pane close and focus actions end-to-end.
+- Keep pane close and focus actions aligned across desktop and CLI.
 - Expose missing runtime handlers where the protocol already supports them or should now support them.
 - Keep CLI and desktop behavior aligned.
 
@@ -231,11 +242,11 @@ Required verification before merge:
 
 ## Recommended Next Action
 
-Build Slice 1 next:
+Build the remaining workspace-management loop next:
 
-- land `xterm.js`
-- remove the temporary input box
-- keep the current `session.output` event pipeline
-- prove restart and stale-session correctness with tests
+- add desktop workspace create/list/switch
+- keep the current split-pane desktop shell as the main workspace surface
+- prove per-workspace pane state survives switching
+- decide whether the next layout step is a backend split tree or a persisted UI-only interim model
 
-That is the shortest path from "working demo" to "feels like the real product."
+That is the shortest path from "working terminal demo" to "actually usable workspace tool."

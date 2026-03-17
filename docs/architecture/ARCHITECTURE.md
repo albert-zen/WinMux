@@ -160,6 +160,12 @@ Each pane stores:
 - Last focused timestamp
 - View state metadata
 
+Current implementation note:
+
+- The long-term architecture is still a recursive split tree owned by Rust.
+- The current desktop UI already renders draggable split panes, but it does so over a linear pane list.
+- Treat that UI layout layer as an interim rendering model, not as proof that the split-tree persistence model is finished.
+
 ### Terminal Session
 
 Represents a PTY-backed shell or command:
@@ -197,6 +203,12 @@ Refresh should prefer event-driven updates with low-frequency polling as a fallb
 5. UI renders the latest authoritative snapshot.
 
 This keeps commands deterministic and testable.
+
+Current implementation note:
+
+- Terminal output is already evented through `session.output`.
+- Desktop metadata still uses hybrid polling via `desktop_state` as a fallback.
+- Pane width ratios are currently maintained in the UI layer and are not yet part of authoritative restored state.
 
 ## Persistence Model
 

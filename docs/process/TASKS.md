@@ -45,6 +45,12 @@ Scope:
 - Focus movement
 - Resize math
 
+Current status:
+
+- workspace registry exists
+- starter split/split/close/focus behavior exists
+- final split-tree model does not yet exist
+
 Deliverables:
 
 - Pure Rust layout engine
@@ -123,6 +129,11 @@ Deliverables:
 - `cmux-win` CLI binary
 - Thin mapping to IPC
 
+Current status:
+
+- workspace create, pane split, session commands, and notify flow already round-trip over named pipe
+- workspace list/switch and fuller pane-management parity remain
+
 Suggested tests:
 
 - Command parsing
@@ -144,6 +155,12 @@ Scope:
 Deliverables:
 
 - Usable core UI
+
+Current status:
+
+- xterm.js pane surface is live
+- desktop split-pane layout, focus, close, resize, and restart are already wired
+- desktop workspace management and final persisted layout semantics remain
 
 Suggested tests:
 
@@ -278,6 +295,13 @@ Dependencies:
 3. Package E and F
 4. Package G, H, I, J in parallel
 5. Package K
+
+## Recommended Order From Current State
+
+1. Finish Package E workspace commands and Package F workspace switcher together
+2. Upgrade Package B from linear pane list semantics to a real split tree
+3. Build Package I restore on top of that authoritative layout model
+4. Continue Package G and H after workspace switching is stable
 
 ## Coding Rules For Subagents
 

@@ -46,6 +46,11 @@ Exit criteria:
 - Focus, resize, and input work reliably in normal use
 - CLI can create/list/switch workspaces
 
+Current progress note:
+
+- panes, focus, resize, split, close, restart, PTY, and desktop terminal rendering are already working
+- desktop workspace switching and the final split-tree model are still the main blockers for finishing this phase
+
 ### Phase 2: Dogfood
 
 Duration: 3 to 4 weeks

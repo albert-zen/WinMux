@@ -134,14 +134,32 @@ These are still intentionally open:
 
 ## Suggested Next Action
 
-The next practical step is not to start styling the UI.
+The next practical step is no longer terminal rendering or basic split UI.
 
 The next practical step is:
 
-1. Scaffold the repo
-2. Lock the domain types
-3. Implement and test the layout engine
-4. Implement and test the IPC contract
-5. Bring up the PTY host
+1. Add desktop workspace create/list/switch flow
+2. Decide how split-pane ratios should become authoritative state
+3. Upgrade the backend layout model from linear pane list to a real split tree
+4. Implement restore around that layout model
+5. Harden long-running PTY and resize behavior
+
+## Current Reality Check
+
+At handoff time, the repository already includes:
+
+- ConPTY-backed live sessions
+- named-pipe desktop/CLI transport
+- xterm.js pane rendering
+- `session.output` event streaming
+- end-to-end pane focus and close
+- a draggable split-pane desktop layout
+
+Important caveat:
+
+- the current desktop split layout is still a linear UI model layered over pane identities
+- it is not yet the final persisted split-tree architecture described elsewhere in the docs
+
+Do not assume the layout problem is "done" just because the desktop app now has split panes.
 
 That ordering keeps the project grounded in the hard parts first.

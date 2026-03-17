@@ -79,6 +79,25 @@ The implementation should be different where Windows requires different primitiv
 - ConPTY for Windows pseudo-terminal support
 - SQLite plus small JSON config surfaces for persistence
 
+## Current Status
+
+The repository is past the bootstrap stage.
+
+What already works today:
+
+- live ConPTY-backed terminal sessions
+- named-pipe transport between desktop backend and CLI
+- xterm.js terminal panes in the desktop app
+- split, focus, close, resize, and restart flows for panes
+- streamed terminal output plus snapshot polling fallback
+
+What is still incomplete:
+
+- desktop workspace create/list/switch flow
+- authoritative persisted split-tree layout model
+- restore and reopen behavior
+- broader hardening for long-running daily use
+
 ## Quick Start
 
 1. Install Rust and the Windows build prerequisites for Tauri.
@@ -109,6 +128,9 @@ The app is successful when a Windows developer can:
 5. Control the app through a local CLI or script.
 6. Use a theme that feels familiar.
 7. Install updates without manual replacement workflows.
+
+The current codebase is not at that bar yet, but it is now beyond a static demo:
+it already behaves like a rough multi-pane terminal workspace prototype.
 
 ## Where To Read Next
 
