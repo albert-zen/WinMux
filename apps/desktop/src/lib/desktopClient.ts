@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { NotificationPayload } from "@cmux-win/protocol";
 
 type WorkspaceCreateResult = {
   workspaceId: string;
@@ -52,4 +53,25 @@ export function workspaceRename(workspaceId: string, name: string): Promise<void
 
 export function setActiveWorkspace(workspaceId: string): Promise<void> {
   return invoke("set_active_workspace", { workspaceId });
+}
+
+export function notifySend(payload: {
+  title: string;
+  body: string;
+  level: string;
+  workspaceId?: string;
+}): Promise<{ queued: boolean; notificationId: string }> {
+  return invoke("notify_send", payload);
+}
+
+export function getNotifications(): Promise<NotificationPayload[]> {
+  return invoke("get_notifications");
+}
+
+export function markNotificationRead(id: string): Promise<void> {
+  return invoke("mark_notification_read", { id });
+}
+
+export function getUnreadCount(): Promise<number> {
+  return invoke("get_unread_count");
 }

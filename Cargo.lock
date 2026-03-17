@@ -563,6 +563,7 @@ dependencies = [
  "core-events",
  "core-ipc",
  "core-layout",
+ "core-notify",
  "core-session",
  "core-state",
  "dirs",

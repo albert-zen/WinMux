@@ -12,6 +12,7 @@ import {
   setActiveWorkspace,
 } from "./lib/desktopClient";
 import { WorkspaceSplitView } from "./components/WorkspaceSplitView";
+import { NotificationCenter } from "./components/NotificationCenter";
 import "./App.css";
 
 function App() {
@@ -268,6 +269,7 @@ function App() {
           </p>
         </div>
         <div className="header-meta">
+          <NotificationCenter />
           <span>{workspace?.name ?? "loading"}</span>
           <span>{workspace?.shellProfile ?? "waiting"}</span>
         </div>

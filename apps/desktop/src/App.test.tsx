@@ -33,6 +33,10 @@ vi.mock("./components/PaneTerminal", () => ({
   PaneTerminal: vi.fn(({ pane }) => <div data-testid={`pane-terminal-${pane.paneId}`} />),
 }));
 
+vi.mock("./components/NotificationCenter", () => ({
+  NotificationCenter: vi.fn(() => <div data-testid="notification-center" />),
+}));
+
 describe("App terminal pane", () => {
   beforeEach(() => {
     vi.mocked(paneSplit).mockResolvedValue(undefined);

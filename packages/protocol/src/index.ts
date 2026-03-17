@@ -124,3 +124,15 @@ export type DomainEvent =
   | { type: "sessionStarted"; sessionId: string; workspaceId: string; paneId: string }
   | { type: "sessionExited"; sessionId: string }
   | { type: "notificationCreated"; notificationId: string };
+
+export type NotificationLevel = "info" | "warning" | "error";
+
+export type NotificationPayload = {
+  id: string;
+  level: NotificationLevel;
+  title: string;
+  body: string;
+  workspaceId: string | null;
+  timestampMs: number;
+  read: boolean;
+};

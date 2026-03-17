@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use core_events::DomainEvent;
 use core_ipc::{ErrorCode, ProtocolError, RequestEnvelope, ResponseEnvelope, ResponseExt, RuntimeContext};
+use core_notify::NotificationStore;
 use core_session::{
     LiveSessionRegistry, PtySessionFactory, SessionHostFactory, SessionRuntimeError, SessionSpec,
     TerminalSize,
@@ -32,6 +33,7 @@ pub struct AppState {
 struct RuntimeState<F> {
     registry: WorkspaceRegistry,
     sessions: LiveSessionRegistry<F>,
+    notifications: NotificationStore,
     state_path: Option<PathBuf>,
     active_workspace_id: Option<String>,
 }
@@ -83,6 +85,7 @@ where
         let mut runtime = Self {
             registry,
             sessions: LiveSessionRegistry::new(factory),
+            notifications: NotificationStore::new(),
             state_path: None,
             active_workspace_id: None,
         };
@@ -98,6 +101,7 @@ where
         let mut runtime = Self {
             registry,
             sessions: LiveSessionRegistry::new(factory),
+            notifications: NotificationStore::new(),
             state_path: Some(state_path),
             active_workspace_id: None,
         };
@@ -531,6 +535,91 @@ fn set_active_workspace(
     runtime.active_workspace_id = Some(workspace_id);
     runtime.save_registry();
     Ok(())
+}
+
+#[tauri::command]
+fn notify_send(
+    title: String,
+    body: String,
+    level: String,
+    workspace_id: Option<String>,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<Value, String> {
+    let mut runtime = state.runtime.lock().unwrap();
+    let notification_level = match level.as_str() {
+        "warning" => core_notify::NotificationLevel::Warning,
+        "error" => core_notify::NotificationLevel::Error,
+        _ => core_notify::NotificationLevel::Info,
+    };
+    let id = format!(
+        "notif-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos())
+    );
+    let timestamp_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64);
+    let notification = core_notify::Notification {
+        id: id.clone(),
+        level: notification_level,
+        source: core_notify::NotificationSource::App,
+        title: title.clone(),
+        body: body.clone(),
+        workspace_id: workspace_id.clone(),
+        timestamp_ms,
+        read: false,
+    };
+    runtime.notifications.push(notification);
+    let _ = app_handle.emit(
+        DOMAIN_EVENT_NAME,
+        DomainEvent::notification_created(&id),
+    );
+    Ok(json!({ "queued": true, "notificationId": id }))
+}
+
+#[tauri::command]
+fn get_notifications(
+    state: tauri::State<'_, AppState>,
+) -> Vec<Value> {
+    let runtime = state.runtime.lock().unwrap();
+    runtime
+        .notifications
+        .list_all()
+        .iter()
+        .rev()
+        .map(|n| {
+            json!({
+                "id": n.id,
+                "level": format!("{:?}", n.level).to_lowercase(),
+                "title": n.title,
+                "body": n.body,
+                "workspaceId": n.workspace_id,
+                "timestampMs": n.timestamp_ms,
+                "read": n.read,
+            })
+        })
+        .collect()
+}
+
+#[tauri::command]
+fn mark_notification_read(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let mut runtime = state.runtime.lock().unwrap();
+    runtime
+        .notifications
+        .mark_read(&id)
+        .map_err(|_| "notification not found".to_string())
+}
+
+#[tauri::command]
+fn get_unread_count(
+    state: tauri::State<'_, AppState>,
+) -> usize {
+    state.runtime.lock().unwrap().notifications.unread_count()
 }
 
 fn default_terminal_size() -> TerminalSize {
@@ -1156,7 +1245,11 @@ pub fn run() {
             session_send_input,
             session_restart,
             session_resize,
-            set_active_workspace
+            set_active_workspace,
+            notify_send,
+            get_notifications,
+            mark_notification_read,
+            get_unread_count
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -2459,5 +2552,79 @@ mod tests {
         assert_eq!(snapshot.active_workspace_id, Some("ws-inbox".to_string()));
         let json = serde_json::to_value(&snapshot).unwrap();
         assert_eq!(json["activeWorkspaceId"], "ws-inbox");
+    }
+
+    #[test]
+    fn notify_send_stores_notification_in_runtime() {
+        let mut runtime = test_runtime();
+        assert_eq!(runtime.notifications.len(), 0);
+
+        let notification = core_notify::Notification {
+            id: "test-notif".to_string(),
+            level: core_notify::NotificationLevel::Info,
+            source: core_notify::NotificationSource::App,
+            title: "Test".to_string(),
+            body: "Hello".to_string(),
+            workspace_id: None,
+            timestamp_ms: 1000,
+            read: false,
+        };
+        runtime.notifications.push(notification);
+
+        assert_eq!(runtime.notifications.len(), 1);
+        assert_eq!(runtime.notifications.unread_count(), 1);
+    }
+
+    #[test]
+    fn notify_list_returns_stored_notifications() {
+        let mut runtime = test_runtime();
+
+        for i in 0..3 {
+            runtime.notifications.push(core_notify::Notification {
+                id: format!("notif-{i}"),
+                level: core_notify::NotificationLevel::Info,
+                source: core_notify::NotificationSource::App,
+                title: format!("Title {i}"),
+                body: format!("Body {i}"),
+                workspace_id: None,
+                timestamp_ms: 1000 + i as u64,
+                read: false,
+            });
+        }
+
+        let all = runtime.notifications.list_all();
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].id, "notif-0");
+        assert_eq!(all[2].id, "notif-2");
+    }
+
+    #[test]
+    fn notify_mark_read_updates_unread_count() {
+        let mut runtime = test_runtime();
+
+        runtime.notifications.push(core_notify::Notification {
+            id: "n1".to_string(),
+            level: core_notify::NotificationLevel::Warning,
+            source: core_notify::NotificationSource::App,
+            title: "T".to_string(),
+            body: "B".to_string(),
+            workspace_id: None,
+            timestamp_ms: 1000,
+            read: false,
+        });
+        runtime.notifications.push(core_notify::Notification {
+            id: "n2".to_string(),
+            level: core_notify::NotificationLevel::Error,
+            source: core_notify::NotificationSource::App,
+            title: "T2".to_string(),
+            body: "B2".to_string(),
+            workspace_id: None,
+            timestamp_ms: 2000,
+            read: false,
+        });
+
+        assert_eq!(runtime.notifications.unread_count(), 2);
+        runtime.notifications.mark_read("n1").unwrap();
+        assert_eq!(runtime.notifications.unread_count(), 1);
     }
 }
