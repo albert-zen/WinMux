@@ -38,7 +38,14 @@ input {
   gap: 18px;
 }
 
+.workspace-shell {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 18px;
+}
+
 .app-header,
+.workspace-rail,
 .workspace-panel {
   background: #1c1917;
   border: 1px solid #322c27;
@@ -84,6 +91,74 @@ input {
   display: grid;
   gap: 16px;
   min-height: 520px;
+}
+
+.workspace-rail {
+  padding: 18px;
+  display: grid;
+  align-content: start;
+  gap: 18px;
+}
+
+.workspace-rail-section {
+  display: grid;
+  gap: 12px;
+}
+
+.workspace-list {
+  display: grid;
+  gap: 8px;
+}
+
+.workspace-list-item {
+  background: #201c19;
+  border: 1px solid #342d27;
+  border-radius: 8px;
+  color: #ece8df;
+  padding: 10px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+}
+
+.workspace-list-item-active {
+  border-color: #7b4b2a;
+  background: #241f1b;
+}
+
+.workspace-list-item small {
+  color: #b9b0a4;
+  font-family: "Cascadia Code", "Consolas", monospace;
+}
+
+.workspace-create label {
+  display: grid;
+  gap: 6px;
+}
+
+.workspace-create span {
+  color: #b9b0a4;
+  font-size: 0.9rem;
+}
+
+.workspace-create input {
+  background: #201c19;
+  border: 1px solid #342d27;
+  border-radius: 8px;
+  color: #ece8df;
+  padding: 10px 12px;
+}
+
+.workspace-create input:focus {
+  outline: 1px solid #7b4b2a;
+  border-color: #7b4b2a;
+}
+
+.create-error {
+  margin: 0;
+  color: #e7a27a;
+  font-size: 0.9rem;
 }
 
 .workspace-panel-empty {
@@ -253,6 +328,7 @@ input {
     padding: 16px;
   }
 
+  .workspace-shell,
   .app-header,
   .workspace-toolbar {
     grid-template-columns: 1fr;

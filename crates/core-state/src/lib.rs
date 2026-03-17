@@ -205,6 +205,16 @@ impl WorkspaceRegistry {
         self.workspaces.iter().map(WorkspaceRecord::summary).collect()
     }
 
+    pub fn remove_workspace(&mut self, workspace_id: &str) -> Result<(), WorkspaceError> {
+        let index = self
+            .workspaces
+            .iter()
+            .position(|workspace| workspace.id == workspace_id)
+            .ok_or(WorkspaceError::WorkspaceNotFound)?;
+        self.workspaces.remove(index);
+        Ok(())
+    }
+
     /// Split a pane inside the named workspace, delegating to `WorkspaceLayout`.
     pub fn split_pane(
         &mut self,
@@ -466,6 +476,27 @@ mod tests {
         let mut reg = make_registry_with_two();
 
         let err = reg.focus_pane("ws-missing", "pane-1").unwrap_err();
+
+        assert_eq!(err, WorkspaceError::WorkspaceNotFound);
+    }
+
+    #[test]
+    fn remove_workspace_drops_existing_entry_and_preserves_order() {
+        let mut reg = make_registry_with_two();
+
+        reg.remove_workspace("ws-a")
+            .expect("existing workspace should be removable");
+
+        let list = reg.list();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, "ws-b");
+    }
+
+    #[test]
+    fn remove_workspace_on_unknown_workspace_returns_workspace_not_found() {
+        let mut reg = make_registry_with_two();
+
+        let err = reg.remove_workspace("ws-missing").unwrap_err();
 
         assert_eq!(err, WorkspaceError::WorkspaceNotFound);
     }

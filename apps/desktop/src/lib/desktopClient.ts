@@ -1,7 +1,21 @@
 import { invoke } from "@tauri-apps/api/core";
 
+type WorkspaceCreateResult = {
+  workspaceId: string;
+  sessionId: string;
+  paneId: string;
+};
+
 export function sessionSendInput(sessionId: string, input: string): Promise<void> {
   return invoke("session_send_input", { sessionId, input });
+}
+
+export function workspaceCreate(payload: {
+  name: string;
+  rootDir: string;
+  shellProfile: string;
+}): Promise<WorkspaceCreateResult> {
+  return invoke("workspace_create", payload);
 }
 
 export function paneSplit(

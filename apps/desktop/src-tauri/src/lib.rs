@@ -1,4 +1,9 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicU64, Ordering},
+};
+use std::time::{SystemTime, UNIX_EPOCH};
+use std::collections::HashSet;
 
 use core_ipc::{ErrorCode, ProtocolError, RequestEnvelope, ResponseEnvelope, ResponseExt};
 use core_session::{
@@ -14,6 +19,8 @@ pub const PIPE_NAME: &str = r"\\.\pipe\cmux-win-v1";
 pub const SESSION_OUTPUT_EVENT_NAME: &str = "session.output";
 
 type AppRuntime = RuntimeState<PtySessionFactory>;
+
+static NEXT_PANE_ID_SUFFIX: AtomicU64 = AtomicU64::new(1);
 
 pub struct AppState {
     runtime: Arc<Mutex<AppRuntime>>,
@@ -203,6 +210,33 @@ fn desktop_state(state: tauri::State<'_, AppState>) -> DesktopState {
 }
 
 #[tauri::command]
+fn workspace_create(
+    name: String,
+    root_dir: String,
+    shell_profile: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Value, String> {
+    let request = RequestEnvelope::new(
+        "desktop-workspace-create",
+        "workspace.create",
+        json!({
+            "name": name,
+            "rootDir": root_dir,
+            "shellProfile": shell_profile,
+        }),
+    );
+    let response = dispatch_runtime_request(&request, &mut state.runtime.lock().unwrap());
+    if response.is_ok() {
+        Ok(response.result().cloned().unwrap_or_else(|| json!({})))
+    } else {
+        Err(response
+            .error()
+            .map(|error| error.message.clone())
+            .unwrap_or_else(|| "workspace create failed".to_string()))
+    }
+}
+
+#[tauri::command]
 fn pane_split(
     workspace_id: String,
     pane_id: String,
@@ -216,7 +250,7 @@ fn pane_split(
         json!({
             "workspaceId": workspace_id,
             "paneId": pane_id,
-            "newPaneId": format!("pane-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |duration| duration.as_millis())),
+            "newPaneId": next_pane_id(),
             "orientation": orientation,
             "ratio": 0.5,
         }),
@@ -369,6 +403,14 @@ fn normalize_split_direction(direction: &str) -> Result<&'static str, String> {
     }
 }
 
+fn next_pane_id() -> String {
+    let suffix = NEXT_PANE_ID_SUFFIX.fetch_add(1, Ordering::Relaxed);
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    format!("pane-{timestamp}-{suffix}")
+}
+
 fn request_id_from_input(input: &str) -> String {
     serde_json::from_str::<Value>(input)
         .ok()
@@ -477,6 +519,48 @@ fn find_workspace<'a>(
     registry.list().iter().find(|workspace| workspace.id == workspace_id)
 }
 
+fn result_field(response: &ResponseEnvelope, field: &str) -> Option<String> {
+    response
+        .result()
+        .and_then(|result| result[field].as_str())
+        .map(str::to_string)
+}
+
+fn rollback_created_workspaces(registry: &mut WorkspaceRegistry, existing_ids: &HashSet<String>) {
+    let created_ids = registry
+        .list()
+        .iter()
+        .filter(|workspace| !existing_ids.contains(&workspace.id))
+        .map(|workspace| workspace.id.clone())
+        .collect::<Vec<_>>();
+
+    for workspace_id in created_ids {
+        let _ = registry.remove_workspace(&workspace_id);
+    }
+}
+
+fn rollback_split_panes(
+    registry: &mut WorkspaceRegistry,
+    workspace_id: &str,
+    existing_pane_ids: &HashSet<String>,
+) {
+    let new_pane_ids = find_workspace(registry, workspace_id)
+        .map(|workspace| {
+            workspace
+                .layout
+                .panes
+                .iter()
+                .filter(|pane| !existing_pane_ids.contains(&pane.pane_id))
+                .map(|pane| pane.pane_id.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    for pane_id in new_pane_ids {
+        let _ = registry.close_pane(workspace_id, &pane_id);
+    }
+}
+
 fn handle_workspace_create<F>(
     request: &RequestEnvelope,
     runtime: &mut RuntimeState<F>,
@@ -484,17 +568,29 @@ fn handle_workspace_create<F>(
 where
     F: SessionHostFactory,
 {
+    let existing_workspace_ids = runtime
+        .registry
+        .list()
+        .iter()
+        .map(|workspace| workspace.id.clone())
+        .collect::<HashSet<_>>();
     let response = core_ipc::dispatch(request, &mut runtime.registry);
     if !response.is_ok() {
         return response;
     }
 
-    let workspace_id = response
-        .result()
-        .and_then(|result| result["workspaceId"].as_str())
-        .unwrap_or_default()
-        .to_string();
+    let Some(workspace_id) = result_field(&response, "workspaceId") else {
+        rollback_created_workspaces(&mut runtime.registry, &existing_workspace_ids);
+        return ResponseEnvelope::error(
+            request.id(),
+            ProtocolError::new(
+                ErrorCode::InternalError,
+                "workspace.create response missing workspaceId",
+            ),
+        );
+    };
     let Some(workspace) = find_workspace(&runtime.registry, &workspace_id) else {
+        rollback_created_workspaces(&mut runtime.registry, &existing_workspace_ids);
         return ResponseEnvelope::error(
             request.id(),
             ProtocolError::new(ErrorCode::InternalError, "Created workspace missing from registry"),
@@ -503,21 +599,33 @@ where
 
     let shell_profile = workspace.shell_profile.clone();
     let root_dir = workspace.root_dir.clone();
+    let Some(pane_id) = workspace.layout.panes.first().map(|pane| pane.pane_id.clone()) else {
+        rollback_created_workspaces(&mut runtime.registry, &existing_workspace_ids);
+        return ResponseEnvelope::error(
+            request.id(),
+            ProtocolError::new(ErrorCode::InternalError, "Created workspace has no panes"),
+        );
+    };
 
     match runtime.sessions.start(
         &workspace_id,
-        "pane-1",
-        SessionSpec::new(format!("{workspace_id}:pane-1"), &shell_profile).with_working_dir(root_dir),
+        &pane_id,
+        SessionSpec::new(format!("{workspace_id}:{pane_id}"), &shell_profile)
+            .with_working_dir(root_dir),
         default_terminal_size(),
     ) {
         Ok(session_id) => ResponseEnvelope::success(
             request.id(),
             json!({
                 "workspaceId": workspace_id,
+                "paneId": pane_id,
                 "sessionId": session_id,
             }),
         ),
-        Err(error) => runtime_error_response(request.id(), error),
+        Err(error) => {
+            let _ = runtime.registry.remove_workspace(&workspace_id);
+            runtime_error_response(request.id(), error)
+        }
     }
 }
 
@@ -528,21 +636,37 @@ fn handle_pane_split<F>(
 where
     F: SessionHostFactory,
 {
+    let workspace_id = request.payload()["workspaceId"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    let existing_pane_ids = find_workspace(&runtime.registry, &workspace_id)
+        .map(|workspace| {
+            workspace
+                .layout
+                .panes
+                .iter()
+                .map(|pane| pane.pane_id.clone())
+                .collect::<HashSet<_>>()
+        })
+        .unwrap_or_default();
     let response = core_ipc::dispatch(request, &mut runtime.registry);
     if !response.is_ok() {
         return response;
     }
 
-    let workspace_id = request.payload()["workspaceId"]
-        .as_str()
-        .unwrap_or_default()
-        .to_string();
-    let pane_id = response
-        .result()
-        .and_then(|result| result["newPaneId"].as_str())
-        .unwrap_or_default()
-        .to_string();
+    let Some(pane_id) = result_field(&response, "newPaneId") else {
+        rollback_split_panes(&mut runtime.registry, &workspace_id, &existing_pane_ids);
+        return ResponseEnvelope::error(
+            request.id(),
+            ProtocolError::new(
+                ErrorCode::InternalError,
+                "pane.split response missing newPaneId",
+            ),
+        );
+    };
     let Some(workspace) = find_workspace(&runtime.registry, &workspace_id) else {
+        rollback_split_panes(&mut runtime.registry, &workspace_id, &existing_pane_ids);
         return ResponseEnvelope::error(
             request.id(),
             ProtocolError::new(ErrorCode::InternalError, "Split workspace missing from registry"),
@@ -567,7 +691,10 @@ where
                 "sessionId": session_id,
             }),
         ),
-        Err(error) => runtime_error_response(request.id(), error),
+        Err(error) => {
+            rollback_split_panes(&mut runtime.registry, &workspace_id, &existing_pane_ids);
+            runtime_error_response(request.id(), error)
+        }
     }
 }
 
@@ -893,6 +1020,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             desktop_bootstrap,
             desktop_state,
+            workspace_create,
             pane_split,
             pane_focus,
             pane_close,
@@ -917,6 +1045,7 @@ mod tests {
         writes: Vec<Vec<u8>>,
         outputs: Vec<Arc<Mutex<Vec<u8>>>>,
         exited: bool,
+        fail_next_spawn: bool,
     }
 
     #[derive(Clone, Default)]
@@ -962,6 +1091,10 @@ mod tests {
         ) -> Result<Box<dyn SessionHost>, String> {
             let output = Arc::new(Mutex::new(Vec::new()));
             let mut state = self.state.lock().unwrap();
+            if state.fail_next_spawn {
+                state.fail_next_spawn = false;
+                return Err(format!("spawn failed for {}", spec.command));
+            }
             state.outputs.push(Arc::clone(&output));
             state.spawn_commands.push(spec.command.clone());
             Ok(Box::new(FakeHost {
@@ -973,6 +1106,10 @@ mod tests {
 
     fn test_runtime() -> RuntimeState<FakeFactory> {
         RuntimeState::new(core_state::starter_workspace_registry(), FakeFactory::default())
+    }
+
+    fn test_runtime_with_factory(factory: FakeFactory) -> RuntimeState<FakeFactory> {
+        RuntimeState::new(core_state::starter_workspace_registry(), factory)
     }
 
     #[test]
@@ -1211,8 +1348,10 @@ mod tests {
         let response: ResponseEnvelope = serde_json::from_str(&raw).unwrap();
         assert!(response.is_ok());
         let workspace_id = response.result().unwrap()["workspaceId"].as_str().unwrap();
+        let pane_id = response.result().unwrap()["paneId"].as_str().unwrap();
         let session_id = response.result().unwrap()["sessionId"].as_str().unwrap();
-        assert_eq!(runtime.sessions.session_id_for_pane(workspace_id, "pane-1"), Some(session_id));
+        assert_eq!(pane_id, "pane-1");
+        assert_eq!(runtime.sessions.session_id_for_pane(workspace_id, pane_id), Some(session_id));
         let workspace = runtime
             .registry
             .list()
@@ -1220,6 +1359,33 @@ mod tests {
             .find(|workspace| workspace.id == workspace_id)
             .unwrap();
         assert_eq!(workspace.shell_profile, "pwsh");
+    }
+
+    #[test]
+    fn handle_runtime_request_workspace_create_rolls_back_registry_when_session_start_fails() {
+        let factory = FakeFactory::default();
+        let mut runtime = test_runtime_with_factory(factory.clone());
+        factory.state.lock().unwrap().fail_next_spawn = true;
+
+        let raw = handle_runtime_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req-create-fail",
+                "type": "command",
+                "command": "workspace.create",
+                "payload": {
+                    "name": "api",
+                    "rootDir": "D:\\dev\\api",
+                    "shellProfile": "pwsh"
+                }
+            }"#,
+            &mut runtime,
+        );
+
+        let response: ResponseEnvelope = serde_json::from_str(&raw).unwrap();
+        assert!(!response.is_ok());
+        assert_eq!(runtime.registry.list().len(), 1);
+        assert_eq!(runtime.registry.list()[0].id, "ws-inbox");
     }
 
     #[test]
@@ -1256,6 +1422,38 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[test]
+    fn handle_runtime_request_pane_split_rolls_back_layout_when_session_start_fails() {
+        let factory = FakeFactory::default();
+        let mut runtime = test_runtime_with_factory(factory.clone());
+        factory.state.lock().unwrap().fail_next_spawn = true;
+
+        let raw = handle_runtime_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req-split-fail",
+                "type": "command",
+                "command": "pane.split",
+                "payload": {
+                    "workspaceId": "ws-inbox",
+                    "paneId": "pane-1",
+                    "newPaneId": "pane-2",
+                    "orientation": "vertical",
+                    "ratio": 0.5
+                }
+            }"#,
+            &mut runtime,
+        );
+
+        let response: ResponseEnvelope = serde_json::from_str(&raw).unwrap();
+        assert!(!response.is_ok());
+
+        let snapshot = runtime.snapshot();
+        assert_eq!(snapshot.workspaces[0].panes.len(), 1);
+        assert_eq!(snapshot.workspaces[0].panes[0].pane_id, "pane-1");
+        assert_eq!(runtime.sessions.session_id_for_pane("ws-inbox", "pane-2"), None);
     }
 
     #[test]
@@ -1402,6 +1600,31 @@ mod tests {
         assert!(close_response.is_ok());
         assert_eq!(runtime.sessions.session_id_for_pane("ws-inbox", "pane-2"), None);
         assert_eq!(runtime.snapshot().workspaces[0].panes.len(), 1);
+    }
+
+    #[test]
+    fn handle_runtime_request_pane_close_keeps_session_binding_when_last_pane_close_is_rejected() {
+        let mut runtime = test_runtime();
+
+        let closed = handle_runtime_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req-close-last",
+                "type": "command",
+                "command": "pane.close",
+                "payload": {
+                    "workspaceId": "ws-inbox",
+                    "paneId": "pane-1"
+                }
+            }"#,
+            &mut runtime,
+        );
+        let close_response: ResponseEnvelope = serde_json::from_str(&closed).unwrap();
+        assert!(!close_response.is_ok());
+        assert_eq!(
+            runtime.sessions.session_id_for_pane("ws-inbox", "pane-1"),
+            Some("session:1")
+        );
     }
 
     #[test]
@@ -1677,5 +1900,71 @@ mod tests {
         let err = normalize_split_direction("diagonal").unwrap_err();
 
         assert_eq!(err, "Unsupported split direction: diagonal");
+    }
+
+    #[test]
+    fn next_pane_id_generates_distinct_values() {
+        let first = next_pane_id();
+        let second = next_pane_id();
+
+        assert_ne!(first, second);
+        assert!(first.starts_with("pane-"));
+        assert!(second.starts_with("pane-"));
+    }
+
+    #[test]
+    fn result_field_reads_string_values_from_success_payloads() {
+        let response = ResponseEnvelope::success(
+            "req-result",
+            json!({
+                "workspaceId": "ws-test",
+                "newPaneId": "pane-2"
+            }),
+        );
+
+        assert_eq!(result_field(&response, "workspaceId").as_deref(), Some("ws-test"));
+        assert_eq!(result_field(&response, "newPaneId").as_deref(), Some("pane-2"));
+        assert_eq!(result_field(&response, "missing"), None);
+    }
+
+    #[test]
+    fn rollback_created_workspaces_removes_entries_not_in_existing_set() {
+        let mut registry = core_state::starter_workspace_registry();
+        registry
+            .create(
+                "ws-extra",
+                "Extra",
+                "D:\\dev\\extra",
+                "pwsh",
+                core_layout::WorkspaceLayout::starter(),
+            )
+            .unwrap();
+        let existing_ids = HashSet::from([String::from("ws-inbox")]);
+
+        rollback_created_workspaces(&mut registry, &existing_ids);
+
+        assert_eq!(registry.list().len(), 1);
+        assert_eq!(registry.list()[0].id, "ws-inbox");
+    }
+
+    #[test]
+    fn rollback_split_panes_closes_new_panes_not_in_existing_set() {
+        let mut registry = core_state::starter_workspace_registry();
+        registry
+            .split_pane(
+                "ws-inbox",
+                "pane-1",
+                "pane-2",
+                core_layout::SplitOrientation::Vertical,
+                0.5,
+            )
+            .unwrap();
+        let existing_panes = HashSet::from([String::from("pane-1")]);
+
+        rollback_split_panes(&mut registry, "ws-inbox", &existing_panes);
+
+        let workspace = &registry.list()[0];
+        assert_eq!(workspace.layout.panes.len(), 1);
+        assert_eq!(workspace.layout.panes[0].pane_id, "pane-1");
     }
 }

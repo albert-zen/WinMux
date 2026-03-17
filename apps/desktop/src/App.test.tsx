@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import App from "./App";
 import { useDesktopState } from "./hooks/useDesktopState";
@@ -7,6 +7,7 @@ import {
   paneFocus,
   paneSplit,
   sessionRestart,
+  workspaceCreate,
 } from "./lib/desktopClient";
 import { PaneTerminal } from "./components/PaneTerminal";
 
@@ -19,6 +20,7 @@ vi.mock("./lib/desktopClient", () => ({
   paneFocus: vi.fn(),
   paneSplit: vi.fn(),
   sessionRestart: vi.fn(),
+  workspaceCreate: vi.fn(),
 }));
 
 vi.mock("./components/PaneTerminal", () => ({
@@ -258,5 +260,209 @@ describe("App terminal pane", () => {
     expect(closeButton.disabled).toBe(true);
     fireEvent.click(closeButton);
     expect(paneClose).not.toHaveBeenCalled();
+  });
+
+  it("switches to a different workspace from the workspace rail", () => {
+    vi.mocked(useDesktopState).mockReturnValue({
+      state: {
+        protocolVersion: 1,
+        workspaces: [
+          {
+            id: "ws-inbox",
+            name: "inbox",
+            rootDir: "D:\\dev\\inbox",
+            shellProfile: "cmd.exe",
+            focusedPaneId: "pane-1",
+            panes: [
+              {
+                paneId: "pane-1",
+                sessionId: "session:1",
+                status: "running",
+                output: "one",
+              },
+            ],
+          },
+          {
+            id: "ws-api",
+            name: "api",
+            rootDir: "D:\\dev\\api",
+            shellProfile: "pwsh",
+            focusedPaneId: "pane-9",
+            panes: [
+              {
+                paneId: "pane-9",
+                sessionId: "session:9",
+                status: "running",
+                output: "api",
+              },
+            ],
+          },
+        ],
+      },
+      error: null,
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open api" }));
+    fireEvent.click(screen.getByRole("button", { name: "Split Right" }));
+
+    expect(screen.getByText("D:\\dev\\api")).toBeTruthy();
+    expect(paneSplit).toHaveBeenCalledWith("ws-api", "pane-9", "vertical");
+  });
+
+  it("does not split when the focused pane id is stale", () => {
+    vi.mocked(useDesktopState).mockReturnValue({
+      state: {
+        protocolVersion: 1,
+        workspaces: [
+          {
+            id: "ws-inbox",
+            name: "inbox",
+            rootDir: "D:\\dev\\inbox",
+            shellProfile: "cmd.exe",
+            focusedPaneId: "pane-stale",
+            panes: [
+              {
+                paneId: "pane-1",
+                sessionId: "session:1",
+                status: "running",
+                output: "one",
+              },
+            ],
+          },
+        ],
+      },
+      error: null,
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Split Right" }));
+
+    expect(paneSplit).not.toHaveBeenCalled();
+  });
+
+  it("creates a workspace from the desktop shell form", async () => {
+    vi.mocked(workspaceCreate).mockResolvedValue({
+      workspaceId: "ws-new",
+      sessionId: "session:new",
+      paneId: "pane-7",
+    });
+
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText("Workspace Name"), {
+      target: { value: "backend" },
+    });
+    fireEvent.change(screen.getByLabelText("Root Directory"), {
+      target: { value: "D:\\dev\\backend" },
+    });
+    fireEvent.change(screen.getByLabelText("Shell Profile"), {
+      target: { value: "pwsh" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create Workspace" }));
+
+    await waitFor(() => {
+      expect(workspaceCreate).toHaveBeenCalledWith({
+        name: "backend",
+        rootDir: "D:\\dev\\backend",
+        shellProfile: "pwsh",
+      });
+      expect(screen.getByText("D:\\dev\\backend")).toBeTruthy();
+      expect(screen.getByTestId("pane-terminal-pane-7")).toBeTruthy();
+      expect(
+        (screen.getByLabelText("Workspace Name") as HTMLInputElement).value
+      ).toBe("");
+    });
+  });
+
+  it("replaces the optimistic workspace with confirmed desktop state", async () => {
+    vi.mocked(workspaceCreate).mockResolvedValue({
+      workspaceId: "ws-new",
+      sessionId: "session:new",
+      paneId: "pane-7",
+    });
+
+    const { rerender } = render(<App />);
+
+    fireEvent.change(screen.getByLabelText("Workspace Name"), {
+      target: { value: "backend" },
+    });
+    fireEvent.change(screen.getByLabelText("Root Directory"), {
+      target: { value: "D:\\dev\\backend" },
+    });
+    fireEvent.change(screen.getByLabelText("Shell Profile"), {
+      target: { value: "pwsh" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create Workspace" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("session:new")).toBeTruthy();
+    });
+
+    vi.mocked(useDesktopState).mockReturnValue({
+      state: {
+        protocolVersion: 1,
+        workspaces: [
+          {
+            id: "ws-inbox",
+            name: "inbox",
+            rootDir: "D:\\dev\\inbox",
+            shellProfile: "cmd.exe",
+            focusedPaneId: "pane-1",
+            panes: [
+              {
+                paneId: "pane-1",
+                sessionId: "session:1",
+                status: "running",
+                output: "one",
+              },
+            ],
+          },
+          {
+            id: "ws-new",
+            name: "backend",
+            rootDir: "D:\\dev\\backend",
+            shellProfile: "pwsh",
+            focusedPaneId: "pane-7",
+            panes: [
+              {
+                paneId: "pane-7",
+                sessionId: "session:real",
+                status: "running",
+                output: "backend ready",
+              },
+            ],
+          },
+        ],
+      },
+      error: null,
+    });
+
+    rerender(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText("session:real")).toBeTruthy();
+      expect(screen.queryByText("session:new")).toBeNull();
+    });
+  });
+
+  it("shows a create error when workspace creation fails", async () => {
+    vi.mocked(workspaceCreate).mockRejectedValue(new Error("duplicate workspace"));
+
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText("Workspace Name"), {
+      target: { value: "inbox" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create Workspace" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("duplicate workspace")).toBeTruthy();
+      expect(
+        (screen.getByLabelText("Workspace Name") as HTMLInputElement).value
+      ).toBe("inbox");
+    });
   });
 });
