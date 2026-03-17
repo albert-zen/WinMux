@@ -23,14 +23,14 @@ As of the latest integration work, the project already has:
 - auto-started sessions for starter workspace, `workspace.create`, and `pane.split`
 - a desktop UI that can:
   - render xterm.js terminal panes
-  - stream session output events into the terminal surface
+  - stream terminal output events into the terminal surface
   - split the focused pane
   - focus and close panes
   - resize panes through a draggable split layout
   - preserve split ratios across pane split/close/rerender
   - restart exited sessions
   - create, close, rename, and switch workspaces from the desktop shell
-- `session.output` event streaming from desktop backend to frontend hook
+- desktop `session-output` event streaming from backend to frontend hook
 - polling fallback through `desktop_state`
 - local persistence of workspace registry state to `state.json`
 - startup restore of workspace names, shell profiles, root directories, pane lists, and focused pane ids
@@ -74,7 +74,7 @@ Why this is next:
 Scope:
 
 - Add an `xterm.js` terminal component per pane.
-- Feed `session.output` chunks directly into the terminal instance.
+- Feed desktop `session-output` chunks directly into the terminal instance.
 - Keep `desktop_state` polling as fallback metadata refresh.
 - Route terminal input back through existing `session_send_input`.
 
@@ -87,7 +87,7 @@ Exit criteria:
 Required tests:
 
 - pane terminal mounts and disposes cleanly
-- `session.output` events write only to the matching pane terminal
+- `session-output` events write only to the matching pane terminal
 - stale session events are ignored after restart
 - fallback snapshot refresh still works when event delivery pauses
 
@@ -175,7 +175,7 @@ What has landed:
 - workspace registry persistence to local `state.json`
 - startup restore with safe fallback on corrupt or unsupported state
 - protocol/version validation for persisted state
-- capped PTY/session output retention with truncation-safe `session.output` event behavior
+- capped PTY/session output retention with truncation-safe `session-output` event behavior
 
 Exit criteria:
 
@@ -196,6 +196,9 @@ What remains in this slice:
 - harden pane id generation against restored custom pane ids
 - decide whether focused-pane persistence should flush immediately or be batched/debounced
 - add stronger PTY failure surfacing in the desktop shell
+- surface per-pane session startup/runtime failures directly in the desktop UI
+- restore the active workspace selection explicitly instead of always falling back to the first entry
+- define whether focus persistence is mutation-driven, timer-driven, or shutdown-only
 
 ## Parallelization Plan
 
@@ -271,6 +274,7 @@ Continue the restore/hardening pass next:
 - persist and restore one clear workspace-level selection signal
 - harden pane id generation against restored layouts and custom pane ids
 - add explicit PTY/runtime error surfaces in the desktop shell
+- then lock in tests for focus persistence and degraded restore behavior
 - then return to the larger architectural step: replacing the linear pane list with a backend split tree
 
 That is now the shortest path from "roughly usable" to "trustworthy enough for daily use."

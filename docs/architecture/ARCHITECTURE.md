@@ -206,7 +206,8 @@ This keeps commands deterministic and testable.
 
 Current implementation note:
 
-- Terminal output is already evented through `session.output`.
+- Terminal output is already evented through the desktop bridge as `session-output`.
+- The logical IPC event name remains `session.output`; the rename exists only because Tauri event names cannot contain `.`.
 - Desktop metadata still uses hybrid polling via `desktop_state` as a fallback.
 - Pane width ratios are currently maintained in the UI layer and are not yet part of authoritative restored state.
 

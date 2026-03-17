@@ -151,7 +151,7 @@ At handoff time, the repository already includes:
 - ConPTY-backed live sessions
 - named-pipe desktop/CLI transport
 - xterm.js pane rendering
-- `session.output` event streaming
+- desktop `session-output` event streaming
 - end-to-end pane focus and close
 - a draggable split-pane desktop layout
 - workspace create/switch/close/rename in desktop UI and CLI
@@ -163,6 +163,7 @@ Important caveat:
 - the current desktop split layout is still a linear UI model layered over pane identities
 - it is not yet the final persisted split-tree architecture described elsewhere in the docs
 - restore currently covers workspace structure and launch context, not every last UI detail
+- Tauri event names cannot contain `.`, so the desktop bridge emits `session-output` even though the logical IPC event name remains `session.output`
 
 Do not assume the layout problem is "done" just because the desktop app now has split panes.
 

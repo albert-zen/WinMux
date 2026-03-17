@@ -105,11 +105,16 @@ What is still incomplete:
 
 1. Install Rust and the Windows build prerequisites for Tauri.
 2. Run `pnpm install` at the repository root.
-3. Run `pnpm dev:web` to start the frontend only.
-4. Run `pnpm dev` to start the full desktop app.
+3. Run `pnpm dev` to start the full desktop app.
+4. Use `pnpm dev:web` only for isolated frontend work that does not require Tauri `invoke` or event wiring.
 5. Run `pnpm test` to execute the current TypeScript and Rust smoke tests.
 
 If `cargo` is not available in a fresh shell after installing Rust, reopen the terminal so the Rust toolchain path is picked up.
+
+Important runtime note:
+
+- the live terminal, workspace actions, and output streaming all depend on the Tauri desktop runtime
+- the frontend-only dev server is not a full-featured way to evaluate the app
 
 ## Repository Layout
 

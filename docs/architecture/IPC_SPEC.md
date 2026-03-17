@@ -177,6 +177,11 @@ Example notify payload:
 
 Terminal output is evented through `session.output`.
 
+Desktop bridge note:
+
+- the logical IPC event name remains `session.output`
+- the Tauri desktop bridge emits the same stream as `session-output` because Tauri event names cannot contain `.`
+
 Payload:
 
 ```json
