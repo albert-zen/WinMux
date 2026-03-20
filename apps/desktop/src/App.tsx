@@ -1,5 +1,6 @@
 import { APP_NAME, paneCount, type WorkspaceState } from "@cmux-win/protocol";
-import { useEffect, useState, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import { useDesktopState } from "./hooks/useDesktopState";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import {
@@ -17,6 +18,15 @@ import { CreateWorkspaceModal } from "./components/CreateWorkspaceModal";
 import { StatusBar } from "./components/StatusBar";
 import "./App.css";
 
+const SIDEBAR_WIDTH_DEFAULT = 220;
+const SIDEBAR_WIDTH_MIN = 140;
+const SIDEBAR_WIDTH_MAX = 440;
+const SIDEBAR_WIDTH_KEY = "cmux.sidebarWidth";
+
+function clampSidebarWidth(width: number): number {
+  return Math.max(SIDEBAR_WIDTH_MIN, Math.min(SIDEBAR_WIDTH_MAX, width));
+}
+
 function App() {
   const { state, error } = useDesktopState();
   const [pendingWorkspace, setPendingWorkspace] = useState<WorkspaceState | null>(null);
@@ -28,6 +38,19 @@ function App() {
   const [paneCloseError, setPaneCloseError] = useState<string | null>(null);
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isSidebarResizing, setIsSidebarResizing] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    if (typeof window === "undefined") {
+      return SIDEBAR_WIDTH_DEFAULT;
+    }
+    const candidate = Number.parseInt(
+      window.localStorage.getItem(SIDEBAR_WIDTH_KEY) ?? "",
+      10,
+    );
+    return clampSidebarWidth(Number.isFinite(candidate) ? candidate : SIDEBAR_WIDTH_DEFAULT);
+  });
+  const sidebarDragStartX = useRef(0);
+  const sidebarDragStartWidth = useRef(SIDEBAR_WIDTH_DEFAULT);
 
   useEffect(() => {
     const nextWorkspaces = state?.workspaces ?? [];
@@ -62,6 +85,50 @@ function App() {
 
     setActiveWorkspaceId(fallbackWorkspace.id);
   }, [activeWorkspaceId, pendingWorkspace, state?.workspaces]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
+    }
+  }, [sidebarWidth]);
+
+  useEffect(() => {
+    if (!isSidebarResizing) {
+      return;
+    }
+
+    const onMouseMove = (event: MouseEvent) => {
+      const next = clampSidebarWidth(
+        sidebarDragStartWidth.current + (event.clientX - sidebarDragStartX.current)
+      );
+      setSidebarWidth(next);
+    };
+    const onMouseUp = () => {
+      setIsSidebarResizing(false);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [isSidebarResizing]);
+
+  const handleSidebarResizeStart = useCallback((event: ReactMouseEvent) => {
+    event.preventDefault();
+    sidebarDragStartX.current = event.clientX;
+    sidebarDragStartWidth.current = sidebarWidth;
+    setIsSidebarResizing(true);
+  }, [sidebarWidth]);
+
+  const handleSidebarResizeReset = useCallback(() => {
+    setSidebarWidth(SIDEBAR_WIDTH_DEFAULT);
+  }, []);
+
+  const shellStyle: CSSProperties = {
+    ["--sidebar-width" as string]: `${sidebarWidth}px`,
+  };
 
   const workspaces =
     pendingWorkspace && !state?.workspaces.some((entry) => entry.id === pendingWorkspace.id)
@@ -218,7 +285,7 @@ function App() {
   const defaultShellProfile = lastWorkspace?.shellProfile ?? "cmd.exe";
 
   return (
-    <main className="app-shell">
+    <main className="app-shell" style={shellStyle}>
       {showBanner ? (
         <div className="error-banner" role="alert">
           <span>{error}</span>
@@ -239,6 +306,14 @@ function App() {
         onSelectWorkspace={handleWorkspaceSelect}
         onNewWorkspace={handleNewWorkspace}
         notificationCounts={notificationCounts}
+      />
+      <div
+        aria-label="Resize sidebar"
+        className={`sidebar-resize-handle${isSidebarResizing ? " sidebar-resize-handle--active" : ""}`}
+        onMouseDown={handleSidebarResizeStart}
+        onDoubleClick={handleSidebarResizeReset}
+        role="separator"
+        title="Drag to resize sidebar"
       />
 
       <section className="workspace-main">
