@@ -147,7 +147,7 @@ Recommended minimum:
 
 ## Agent Rules
 
-Claude subagents must:
+Subagents must:
 
 - Work on a bounded task package
 - Start with tests for non-trivial behavior

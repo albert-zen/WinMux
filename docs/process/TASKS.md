@@ -10,7 +10,7 @@ One lead integrator owns:
 - Final review
 - Release quality bar
 
-Claude subagents own bounded implementation slices with explicit tests.
+Subagents own bounded implementation slices with explicit tests.
 
 ## Task Packages
 
@@ -162,7 +162,7 @@ Current status:
 
 - xterm.js pane surface is live
 - desktop split-pane layout, focus, close, resize, and restart are already wired
-- desktop workspace management is largely in place
+- desktop workspace management is in place, including quick switching and inline rename
 - local registry persistence/restore and output retention caps are now in place
 - final persisted layout semantics and richer restore behavior remain
 

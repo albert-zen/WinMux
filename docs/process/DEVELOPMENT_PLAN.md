@@ -30,10 +30,14 @@ As of the latest integration work, the project already has:
   - preserve split ratios across pane split/close/rerender
   - restart exited sessions
   - create, close, rename, and switch workspaces from the desktop shell
+  - quick-switch workspaces through MRU cycling and a searchable switcher
+  - restore terminal focus after workspace switching
+  - create workspaces from a folder picker with shell presets and suggested names
+  - rename the active workspace inline from the toolbar
 - desktop `session-output` event streaming from backend to frontend hook
 - polling fallback through `desktop_state`
 - local persistence of workspace registry state to `state.json`
-- startup restore of workspace names, shell profiles, root directories, pane lists, and focused pane ids
+- startup restore of workspace names, shell profiles, root directories, pane lists, focused pane ids, and active workspace selection
 - capped PTY/session output retention so long-running sessions do not grow unbounded in memory
 - reset-aware output events so the terminal surface can recover cleanly after capped-prefix truncation
 
@@ -70,15 +74,22 @@ rough because they require extra clicks, weak visual guidance, or too much memor
 
 The most valuable interaction work is:
 
-1. Make workspace switching feel instant and reliable.
-2. Make new workspaces fast to create without hand-editing every field.
-3. Make terminal startup semantics obvious and trustworthy.
-4. Surface failures close to the pane or workspace that caused them.
+1. Finish the remaining workspace-navigation polish around the current shell.
+2. Keep workspace creation and rename keyboard-first and low-friction.
+3. Make terminal startup and restore semantics even more trustworthy.
+4. Keep failures and destructive actions local, visible, and hard to miss.
 
 This track should be implemented before deeper visual polish and in parallel with restore/hardening
 where the file ownership is clean.
 
+Progress note:
+
+- The first interaction-quality wave is largely complete.
+- The remaining interaction work is now about density, speed, and trustworthiness rather than missing basic controls.
+
 ### Interaction Slice A: Workspace Selection Ergonomics
+
+Status: mostly completed
 
 Problem:
 
@@ -93,6 +104,20 @@ Scope:
 - restore terminal focus automatically after a workspace switch
 - make the workspace path and shell profile more visible in the active workspace chrome
 - expose fast actions such as "open root directory" and "copy path"
+
+What has landed:
+
+- active workspace persistence and startup restore
+- MRU switching with `Ctrl+Tab` / `Ctrl+Shift+Tab`
+- searchable quick switcher
+- terminal refocus after workspace switching
+- root-directory visibility plus open/copy path actions
+
+What remains:
+
+- increase workspace rail information density
+- consider "create and switch" behavior inside the quick switcher
+- add favorite/recent presentation if the current rail becomes crowded
 
 Exit criteria:
 
@@ -110,6 +135,8 @@ Required tests:
 
 ### Interaction Slice B: Workspace Creation Flow
 
+Status: mostly completed
+
 Problem:
 
 - creating a workspace still feels too much like filling a raw form
@@ -122,6 +149,19 @@ Scope:
 - offer shell-profile presets such as `cmd.exe`, `pwsh`, and `bash`
 - validate the selected directory before submitting
 - keep the modal optimized for keyboard submission and immediate focus return
+
+What has landed:
+
+- native folder picking on Windows
+- derived workspace names from the selected folder
+- shell presets plus custom shell entry
+- inline path validation before create
+- create success jumps into the new workspace and focuses its starter terminal
+
+What remains:
+
+- polish around "create from switcher" if that workflow is added later
+- optional smarter defaults seeded from recent workspace history instead of just the last active one
 
 Exit criteria:
 
@@ -139,6 +179,8 @@ Required tests:
 
 ### Interaction Slice C: Terminal Start And CWD Semantics
 
+Status: partially completed
+
 Problem:
 
 - users need to trust that "workspace root" really means the shell starts there
@@ -152,6 +194,17 @@ Scope:
   - short term: always start at workspace root
   - later: optionally inherit cwd from the focused pane when the runtime can do so reliably
 - add explicit error surfacing when a workspace directory is invalid or no longer exists
+
+What has landed:
+
+- starter, create, split, and restart flows now consistently target `workspace.rootDir`
+- current workspace directory is visible in the toolbar and status bar
+- invalid working directory failures surface in pane-local status feedback
+
+What remains:
+
+- restore-focused cwd verification beyond the current registry snapshot model
+- a deliberate decision on whether future panes should inherit cwd from the focused pane
 
 Exit criteria:
 
@@ -168,6 +221,8 @@ Required tests:
 
 ### Interaction Slice D: Safety And Feedback
 
+Status: mostly completed
+
 Problem:
 
 - users need clearer guidance when destructive actions or runtime failures happen
@@ -179,6 +234,19 @@ Scope:
 - confirm pane close when the pane has a running session and there is a risk of accidental loss
 - show inline pane-level status detail for startup failure, runtime failure, and exited state
 - upgrade global error banners into more actionable, local feedback where possible
+
+What has landed:
+
+- workspace close confirmation for live panes
+- pane close confirmation for live sessions
+- pane-local status and error surfaces
+- modal confirmation behavior with keyboard trap and `Escape`
+- local rename/create/split/restart feedback paths in the desktop shell
+
+What remains:
+
+- unify the last few toolbar-level and sidebar-level failure messages
+- add richer failure copy for restore and PTY initialization problems
 
 Exit criteria:
 
@@ -257,7 +325,7 @@ Required tests:
 
 ### Slice 3: Workspace And Pane Management Loop
 
-Status: mostly completed
+Status: completed for the current desktop/runtime model
 
 Why this is next:
 
@@ -308,6 +376,7 @@ What has landed:
 - workspace registry persistence to local `state.json`
 - startup restore with safe fallback on corrupt or unsupported state
 - protocol/version validation for persisted state
+- active workspace selection restore
 - capped PTY/session output retention with truncation-safe `session-output` event behavior
 
 Exit criteria:
@@ -330,8 +399,8 @@ What remains in this slice:
 - decide whether focused-pane persistence should flush immediately or be batched/debounced
 - add stronger PTY failure surfacing in the desktop shell
 - surface per-pane session startup/runtime failures directly in the desktop UI
-- restore the active workspace selection explicitly instead of always falling back to the first entry
 - define whether focus persistence is mutation-driven, timer-driven, or shutdown-only
+- decide whether workspace MRU should stay purely frontend-local or gain persisted restore semantics later
 
 ## Parallelization Plan
 
@@ -410,13 +479,17 @@ Required verification before merge:
 
 Continue the restore/hardening pass next:
 
-- persist and restore one clear workspace-level selection signal
-- make workspace switching return focus to the active terminal
-- lock in tests that starter, split, and restored sessions launch in the workspace root
-- add a first round of local pane/workspace failure surfaces
+- lock in tests that restored sessions continue honoring `workspace.rootDir`
 - harden pane id generation against restored layouts and custom pane ids
 - add explicit PTY/runtime error surfaces in the desktop shell
+- decide how focus persistence should flush and restore
 - then lock in tests for focus persistence and degraded restore behavior
 - then return to the larger architectural step: replacing the linear pane list with a backend split tree
+
+After that, the next interaction-only wave should focus on:
+
+- denser workspace rail state
+- quick-switcher create-and-switch flow
+- keyboard pane navigation on top of the current layout
 
 That is now the shortest path from "roughly usable" to "trustworthy enough for daily use."

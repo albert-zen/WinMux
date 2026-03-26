@@ -3,7 +3,7 @@
 ## Assumptions
 
 - One lead integrator defines architecture, reviews work, and controls merges.
-- Claude subagents execute bounded implementation tasks.
+- Subagents execute bounded implementation tasks.
 - Windows-first delivery.
 - Browser panel remains out of scope.
 - Code signing is available by the time updater work starts.
@@ -49,6 +49,7 @@ Exit criteria:
 Current progress note:
 
 - panes, focus, resize, split, close, restart, PTY, workspace management, and desktop terminal rendering are already working
+- quick switching, MRU cycling, workspace creation polish, and inline rename are already working
 - local registry persistence and startup restore are also in place
 - the final split-tree model and richer restore semantics are still the main blockers for finishing this phase
 

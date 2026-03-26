@@ -134,15 +134,16 @@ These are still intentionally open:
 
 ## Suggested Next Action
 
-The next practical step is no longer terminal rendering or basic split UI.
+The next practical step is no longer basic workspace switching or workspace creation.
 
 The next practical step is:
 
 1. Finish the restore/hardening pass around the current model
-2. Decide how split-pane ratios should become authoritative state
-3. Upgrade the backend layout model from linear pane list to a real split tree
-4. Rebuild restore around that layout model
-5. Keep hardening long-running PTY, output, and resize behavior
+2. Decide how focused-pane and pane-id persistence should be hardened
+3. Improve PTY/runtime failure surfacing in the desktop shell
+4. Upgrade the backend layout model from linear pane list to a real split tree
+5. Rebuild restore around that layout model
+6. Keep hardening long-running PTY, output, and resize behavior
 
 ## Current Reality Check
 
@@ -155,6 +156,9 @@ At handoff time, the repository already includes:
 - end-to-end pane focus and close
 - a draggable split-pane desktop layout
 - workspace create/switch/close/rename in desktop UI and CLI
+- searchable quick switching and MRU workspace cycling
+- folder-picker-driven workspace creation with shell presets
+- inline desktop workspace rename
 - local workspace registry persistence with startup restore
 - capped retained PTY/session output for long-running sessions
 

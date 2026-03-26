@@ -90,6 +90,10 @@ What already works today:
 - xterm.js terminal panes in the desktop app
 - split, focus, close, resize, and restart flows for panes
 - workspace create, switch, close, and rename flows in desktop UI and CLI
+- quick switcher and MRU-style workspace switching
+- active-workspace restore on startup
+- folder-picker-driven workspace creation with shell presets and auto-suggested names
+- inline workspace rename from the desktop toolbar
 - streamed terminal output plus snapshot polling fallback
 - local workspace persistence and startup restore for the current registry/layout model
 - capped retained PTY/session output to reduce long-running memory growth

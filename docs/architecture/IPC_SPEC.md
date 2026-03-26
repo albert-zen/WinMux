@@ -179,10 +179,11 @@ Example notify payload:
 ## Event Set v0.1
 
 - `workspace.created`
-- `workspace.updated`
+- `workspace.activated`
+- `workspace.renamed`
 - `workspace.closed`
 - `pane.created`
-- `pane.updated`
+- `pane.focused`
 - `pane.closed`
 - `session.started`
 - `session.output`
