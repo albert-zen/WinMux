@@ -10,13 +10,21 @@ type KeyboardShortcutsConfig = {
   onSplitHorizontal: () => void;
   onNewWorkspace: () => void;
   onWorkspaceJump: (index: number) => void;
+  onWorkspaceCycle: (direction: "forward" | "backward") => void;
+  onOpenQuickSwitcher: () => void;
   onToggleSidebar: () => void;
 };
 
-/**
- * Hook for registering global keyboard shortcuts.
- * Skips dispatch when focus is inside xterm unless it's a global shortcut.
- */
+function isShortcutTargetInTerminal(event: KeyboardEvent): boolean {
+  const targetElement = event.target instanceof Element ? event.target : null;
+  return (
+    targetElement?.closest(".xterm") !== null ||
+    targetElement?.tagName === "TEXTAREA" ||
+    targetElement?.tagName === "SELECT" ||
+    targetElement?.tagName === "INPUT"
+  );
+}
+
 export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
   const {
     workspace,
@@ -24,20 +32,28 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
     onSplitHorizontal,
     onNewWorkspace,
     onWorkspaceJump,
+    onWorkspaceCycle,
+    onOpenQuickSwitcher,
     onToggleSidebar,
   } = config;
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as Element;
-      const isInTerminal =
-        target.closest(".xterm") !== null ||
-        target.tagName === "TEXTAREA" ||
-        (target.tagName === "INPUT" && !event.ctrlKey);
+      const key = event.key.toLowerCase();
+      const isInTerminal = isShortcutTargetInTerminal(event);
 
-      // Global shortcuts (Ctrl+Shift+...) work even inside terminal
       if (event.ctrlKey && event.shiftKey) {
-        switch (event.key.toLowerCase()) {
+        if (event.key === "Tab") {
+          if (isInTerminal) {
+            return;
+          }
+
+          event.preventDefault();
+          onWorkspaceCycle("backward");
+          return;
+        }
+
+        switch (key) {
           case "d":
             event.preventDefault();
             onSplitVertical();
@@ -47,31 +63,48 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
             onSplitHorizontal();
             return;
           case "w":
-            if (workspace) {
-              event.preventDefault();
-              paneClose(workspace.id, workspace.focusedPaneId).catch(() => {
-                // Error handled by caller
-              });
+            if (!workspace) {
+              return;
             }
+
+            event.preventDefault();
+            paneClose(workspace.id, workspace.focusedPaneId).catch(() => {
+              // Error surfaces in the owning view.
+            });
             return;
         }
       }
 
-      // Ctrl+N for new workspace (works inside terminal too)
+      if (isInTerminal) {
+        return;
+      }
+
       if (event.ctrlKey && !event.shiftKey && !event.altKey) {
-        if (event.key.toLowerCase() === "n") {
+        if (key === "k") {
+          event.preventDefault();
+          onOpenQuickSwitcher();
+          return;
+        }
+
+        if (event.key === "Tab") {
+          event.preventDefault();
+          onWorkspaceCycle("forward");
+          return;
+        }
+
+        if (key === "n") {
           event.preventDefault();
           onNewWorkspace();
           return;
         }
-        // Ctrl+B for toggle sidebar
-        if (event.key.toLowerCase() === "b") {
+
+        if (key === "b") {
           event.preventDefault();
           onToggleSidebar();
           return;
         }
-        // Ctrl+1-9 for workspace switching
-        const digit = parseInt(event.key);
+
+        const digit = Number.parseInt(event.key, 10);
         if (digit >= 1 && digit <= 9) {
           event.preventDefault();
           onWorkspaceJump(digit - 1);
@@ -79,18 +112,10 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
         }
       }
 
-      // Skip non-global shortcuts when inside terminal/input
-      if (isInTerminal) {
-        return;
-      }
-
-      // Alt+Arrow keys for directional focus (placeholder for future implementation)
       if (event.altKey && workspace) {
         const arrowKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"];
         if (arrowKeys.includes(event.key)) {
           event.preventDefault();
-          // TODO: Wire up directional focus with layout tree
-          // Requires layout to be passed in config and findDirectionalNeighbor util
         }
       }
     };
@@ -100,11 +125,13 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [
-    workspace,
-    onSplitVertical,
-    onSplitHorizontal,
     onNewWorkspace,
-    onWorkspaceJump,
+    onOpenQuickSwitcher,
+    onSplitHorizontal,
+    onSplitVertical,
     onToggleSidebar,
+    onWorkspaceCycle,
+    onWorkspaceJump,
+    workspace,
   ]);
 }

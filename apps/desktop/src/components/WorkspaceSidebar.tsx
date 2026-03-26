@@ -1,5 +1,5 @@
-import type { WorkspaceState } from "@cmux-win/protocol";
 import { paneCount } from "@cmux-win/protocol";
+import type { WorkspaceState } from "@cmux-win/protocol";
 
 interface Props {
   workspaces: WorkspaceState[];
@@ -19,22 +19,26 @@ export function WorkspaceSidebar({
   return (
     <aside className="workspace-sidebar">
       <div className="workspace-tabs">
-        {workspaces.map((ws) => {
-          const isActive = ws.id === activeWorkspaceId;
-          const notificationCount = notificationCounts[ws.id] ?? 0;
+        {workspaces.map((workspace, index) => {
+          const isActive = workspace.id === activeWorkspaceId;
+          const notificationCount = notificationCounts[workspace.id] ?? 0;
           const hasNotification = notificationCount > 0;
+          const shortcutHint = index < 9 ? `\nCtrl+${index + 1}` : "";
 
           return (
             <button
-              key={ws.id}
+              key={workspace.id}
               type="button"
-              className={`workspace-tab${isActive ? " workspace-tab-active" : ""}${hasNotification ? " workspace-tab-notification" : ""}`}
-              onClick={() => onSelectWorkspace(ws.id)}
-              title={`${ws.name}\n${ws.rootDir}\n${paneCount(ws.layout)} panes`}
+              aria-pressed={isActive}
+              className={`workspace-tab${
+                isActive ? " workspace-tab-active" : ""
+              }${hasNotification ? " workspace-tab-notification" : ""}`}
+              onClick={() => onSelectWorkspace(workspace.id)}
+              title={`${workspace.name}\n${workspace.rootDir}\n${paneCount(
+                workspace.layout,
+              )} panes${shortcutHint}`}
             >
-              <span className="workspace-tab-name">
-                {ws.name.slice(0, 12)}
-              </span>
+              <span className="workspace-tab-name">{workspace.name.slice(0, 12)}</span>
               {hasNotification ? (
                 <span className="workspace-tab-badge">{notificationCount}</span>
               ) : null}

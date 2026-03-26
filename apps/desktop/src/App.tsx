@@ -1,21 +1,23 @@
-import { APP_NAME, paneCount, type WorkspaceState } from "@cmux-win/protocol";
+import type { WorkspaceState } from "@cmux-win/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
-import { useDesktopState } from "./hooks/useDesktopState";
-import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
-import {
-  paneSplit,
-  sessionRestart,
-  paneFocus,
-  paneClose,
-  workspaceClose,
-  workspaceCreate,
-  setActiveWorkspace,
-} from "./lib/desktopClient";
-import { WorkspaceSplitView } from "./components/WorkspaceSplitView";
-import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { CreateWorkspaceModal } from "./components/CreateWorkspaceModal";
 import { StatusBar } from "./components/StatusBar";
+import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
+import { WorkspaceSplitView } from "./components/WorkspaceSplitView";
+import { WorkspaceSwitcher } from "./components/WorkspaceSwitcher";
+import { useDesktopState } from "./hooks/useDesktopState";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useWorkspaceMru } from "./hooks/useWorkspaceMru";
+import {
+  paneClose,
+  paneFocus,
+  paneSplit,
+  sessionRestart,
+  setActiveWorkspace,
+  workspaceCreate,
+} from "./lib/desktopClient";
 import "./App.css";
 
 const SIDEBAR_WIDTH_DEFAULT = 220;
@@ -29,24 +31,24 @@ function clampSidebarWidth(width: number): number {
 
 function App() {
   const { state, error } = useDesktopState();
+  const { mru, touchWorkspace, removeWorkspace, getNextInMru, getPreviousInMru } =
+    useWorkspaceMru();
   const [pendingWorkspace, setPendingWorkspace] = useState<WorkspaceState | null>(null);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
-  const [closeError, setCloseError] = useState<string | null>(null);
+  const [focusNonce, setFocusNonce] = useState(0);
   const [createError, setCreateError] = useState<string | null>(null);
   const [splitError, setSplitError] = useState<string | null>(null);
   const [restartError, setRestartError] = useState<string | null>(null);
   const [paneCloseError, setPaneCloseError] = useState<string | null>(null);
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isQuickSwitcherOpen, setIsQuickSwitcherOpen] = useState(false);
   const [isSidebarResizing, setIsSidebarResizing] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     if (typeof window === "undefined") {
       return SIDEBAR_WIDTH_DEFAULT;
     }
-    const candidate = Number.parseInt(
-      window.localStorage.getItem(SIDEBAR_WIDTH_KEY) ?? "",
-      10,
-    );
+    const candidate = Number.parseInt(window.localStorage.getItem(SIDEBAR_WIDTH_KEY) ?? "", 10);
     return clampSidebarWidth(Number.isFinite(candidate) ? candidate : SIDEBAR_WIDTH_DEFAULT);
   });
   const sidebarDragStartX = useRef(0);
@@ -79,12 +81,13 @@ function App() {
       pendingWorkspace ??
       (serverActiveId && nextWorkspaces.find((ws) => ws.id === serverActiveId)) ??
       nextWorkspaces[0];
+
     if (!fallbackWorkspace) {
       return;
     }
 
     setActiveWorkspaceId(fallbackWorkspace.id);
-  }, [activeWorkspaceId, pendingWorkspace, state?.workspaces]);
+  }, [activeWorkspaceId, pendingWorkspace, state?.activeWorkspaceId, state?.workspaces]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -99,7 +102,7 @@ function App() {
 
     const onMouseMove = (event: MouseEvent) => {
       const next = clampSidebarWidth(
-        sidebarDragStartWidth.current + (event.clientX - sidebarDragStartX.current)
+        sidebarDragStartWidth.current + (event.clientX - sidebarDragStartX.current),
       );
       setSidebarWidth(next);
     };
@@ -115,12 +118,15 @@ function App() {
     };
   }, [isSidebarResizing]);
 
-  const handleSidebarResizeStart = useCallback((event: ReactMouseEvent) => {
-    event.preventDefault();
-    sidebarDragStartX.current = event.clientX;
-    sidebarDragStartWidth.current = sidebarWidth;
-    setIsSidebarResizing(true);
-  }, [sidebarWidth]);
+  const handleSidebarResizeStart = useCallback(
+    (event: ReactMouseEvent) => {
+      event.preventDefault();
+      sidebarDragStartX.current = event.clientX;
+      sidebarDragStartWidth.current = sidebarWidth;
+      setIsSidebarResizing(true);
+    },
+    [sidebarWidth],
+  );
 
   const handleSidebarResizeReset = useCallback(() => {
     setSidebarWidth(SIDEBAR_WIDTH_DEFAULT);
@@ -135,20 +141,40 @@ function App() {
       ? [...(state?.workspaces ?? []), pendingWorkspace]
       : (state?.workspaces ?? []);
 
-  // Derive notification counts from workspace state
   const notificationCounts = Object.fromEntries(
-    workspaces.map((ws) => [ws.id, ws.unreadNotificationCount ?? 0])
+    workspaces.map((ws) => [ws.id, ws.unreadNotificationCount ?? 0]),
   );
 
   const workspace =
     workspaces.find((entry) => entry.id === activeWorkspaceId) ?? workspaces[0] ?? null;
 
+  useEffect(() => {
+    if (workspace) {
+      touchWorkspace(workspace.id);
+    }
+  }, [touchWorkspace, workspace]);
+
+  useEffect(() => {
+    const validIds = new Set(workspaces.map((entry) => entry.id));
+    for (const workspaceId of mru) {
+      if (!validIds.has(workspaceId)) {
+        removeWorkspace(workspaceId);
+      }
+    }
+  }, [mru, removeWorkspace, workspaces]);
+
   const handleWorkspaceSelect = (workspaceId: string) => {
     setActiveWorkspaceId(workspaceId);
+    touchWorkspace(workspaceId);
+    setFocusNonce((prev) => prev + 1);
     void setActiveWorkspace(workspaceId);
   };
 
-  const handleCreateWorkspace = async (config: { name: string; rootDir: string; shellProfile: string }) => {
+  const handleCreateWorkspace = async (config: {
+    name: string;
+    rootDir: string;
+    shellProfile: string;
+  }) => {
     setCreateError(null);
 
     try {
@@ -176,6 +202,8 @@ function App() {
         unreadNotificationCount: 0,
       });
       setActiveWorkspaceId(result.workspaceId);
+      touchWorkspace(result.workspaceId);
+      setFocusNonce((prev) => prev + 1);
       setIsCreateModalOpen(false);
     } catch (reason) {
       setCreateError(reason instanceof Error ? reason.message : String(reason));
@@ -195,30 +223,20 @@ function App() {
   };
 
   const handleFocus = (paneId: string) => {
-    if (!workspace) return;
+    if (!workspace) {
+      return;
+    }
     void paneFocus(workspace.id, paneId);
   };
 
   const handleClose = (paneId: string) => {
-    if (!workspace) return;
+    if (!workspace) {
+      return;
+    }
     setPaneCloseError(null);
     paneClose(workspace.id, paneId).catch((reason) => {
       setPaneCloseError(reason instanceof Error ? reason.message : String(reason));
     });
-  };
-
-  const handleCloseWorkspace = async (workspaceId: string) => {
-    setCloseError(null);
-
-    try {
-      await workspaceClose(workspaceId);
-      if (workspaceId === activeWorkspaceId) {
-        const remaining = workspaces.filter((w) => w.id !== workspaceId);
-        setActiveWorkspaceId(remaining[0]?.id ?? null);
-      }
-    } catch (reason) {
-      setCloseError(reason instanceof Error ? reason.message : String(reason));
-    }
   };
 
   const handleRestartPane = (paneId: string) => {
@@ -226,39 +244,64 @@ function App() {
     if (!pane?.sessionId) {
       return;
     }
+
     setRestartError(null);
     sessionRestart(pane.sessionId).catch((reason) => {
       setRestartError(reason instanceof Error ? reason.message : String(reason));
     });
   };
 
-  const showBanner = error && !bannerDismissed;
-
-  // Reset dismissed state when the error message changes
   useEffect(() => {
     setBannerDismissed(false);
   }, [error]);
 
-  // Keyboard shortcuts
-  const handleSplitVertical = useCallback(() => {
-    handleSplit("vertical");
-  }, [workspace]);
+  const handleWorkspaceJump = useCallback(
+    (index: number) => {
+      const target = workspaces[index];
+      if (target) {
+        handleWorkspaceSelect(target.id);
+      }
+    },
+    [workspaces],
+  );
 
-  const handleSplitHorizontal = useCallback(() => {
-    handleSplit("horizontal");
-  }, [workspace]);
+  const handleWorkspaceCycle = useCallback(
+    (direction: "forward" | "backward") => {
+      if (!activeWorkspaceId) {
+        return;
+      }
 
-  const handleNewWorkspace = useCallback(() => {
-    setIsCreateModalOpen(true);
-  }, []);
+      const nextWorkspaceId =
+        direction === "forward"
+          ? getNextInMru(activeWorkspaceId)
+          : getPreviousInMru(activeWorkspaceId);
 
-  // Workspace switching by number
-  const handleWorkspaceJump = useCallback((index: number) => {
-    const target = workspaces[index];
-    if (target) {
-      handleWorkspaceSelect(target.id);
+      if (nextWorkspaceId) {
+        handleWorkspaceSelect(nextWorkspaceId);
+      }
+    },
+    [activeWorkspaceId, getNextInMru, getPreviousInMru],
+  );
+
+  const handleOpenRootDir = useCallback(() => {
+    if (!workspace) {
+      return;
     }
-  }, [workspaces]);
+    void openPath(workspace.rootDir);
+  }, [workspace]);
+
+  const handleCopyRootDir = useCallback(() => {
+    if (!workspace || typeof navigator === "undefined" || !navigator.clipboard) {
+      return;
+    }
+    void navigator.clipboard.writeText(workspace.rootDir);
+  }, [workspace]);
+
+  const showBanner = Boolean(error) && !bannerDismissed;
+  const totalNotifications = Object.values(notificationCounts).reduce((sum, count) => sum + count, 0);
+  const lastWorkspace = workspaces[workspaces.length - 1];
+  const defaultRootDir = lastWorkspace?.rootDir ?? "D:\\dev\\workspace";
+  const defaultShellProfile = lastWorkspace?.shellProfile ?? "cmd.exe";
 
   useKeyboardShortcuts({
     workspace: workspace
@@ -267,22 +310,14 @@ function App() {
           focusedPaneId: workspace.focusedPaneId,
         }
       : null,
-    onSplitVertical: handleSplitVertical,
-    onSplitHorizontal: handleSplitHorizontal,
-    onNewWorkspace: handleNewWorkspace,
+    onSplitVertical: () => handleSplit("vertical"),
+    onSplitHorizontal: () => handleSplit("horizontal"),
+    onNewWorkspace: () => setIsCreateModalOpen(true),
     onWorkspaceJump: handleWorkspaceJump,
-    onToggleSidebar: () => {
-      // Future: toggle sidebar visibility
-    },
+    onWorkspaceCycle: handleWorkspaceCycle,
+    onOpenQuickSwitcher: () => setIsQuickSwitcherOpen(true),
+    onToggleSidebar: () => {},
   });
-
-  // Calculate total notifications
-  const totalNotifications = Object.values(notificationCounts).reduce((a, b) => a + b, 0);
-
-  // Default values for create form
-  const lastWorkspace = workspaces[workspaces.length - 1];
-  const defaultRootDir = lastWorkspace?.rootDir ?? "D:\\dev\\workspace";
-  const defaultShellProfile = lastWorkspace?.shellProfile ?? "cmd.exe";
 
   return (
     <main className="app-shell" style={shellStyle}>
@@ -304,7 +339,7 @@ function App() {
         workspaces={workspaces}
         activeWorkspaceId={activeWorkspaceId}
         onSelectWorkspace={handleWorkspaceSelect}
-        onNewWorkspace={handleNewWorkspace}
+        onNewWorkspace={() => setIsCreateModalOpen(true)}
         notificationCounts={notificationCounts}
       />
       <div
@@ -332,14 +367,9 @@ function App() {
             {paneCloseError}
           </p>
         ) : null}
-        {closeError ? (
-          <p className="operation-error" role="status">
-            {closeError}
-          </p>
-        ) : null}
-
         {workspace ? (
           <WorkspaceSplitView
+            key={`${workspace.id}:${focusNonce}`}
             workspace={workspace}
             activeTheme={state?.activeTheme}
             onFocusPane={handleFocus}
@@ -354,7 +384,21 @@ function App() {
         )}
       </section>
 
-      <StatusBar workspace={workspace} notificationCount={totalNotifications} />
+      <StatusBar
+        workspace={workspace}
+        notificationCount={totalNotifications}
+        onOpenRootDir={handleOpenRootDir}
+        onCopyRootDir={handleCopyRootDir}
+      />
+
+      <WorkspaceSwitcher
+        isOpen={isQuickSwitcherOpen}
+        workspaces={workspaces}
+        mru={mru}
+        activeWorkspaceId={activeWorkspaceId}
+        onSelect={handleWorkspaceSelect}
+        onClose={() => setIsQuickSwitcherOpen(false)}
+      />
 
       <CreateWorkspaceModal
         isOpen={isCreateModalOpen}
