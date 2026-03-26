@@ -22,6 +22,7 @@ type MockTerminal = {
   onData: ReturnType<typeof vi.fn>;
   reset: ReturnType<typeof vi.fn>;
   syncSize: ReturnType<typeof vi.fn>;
+  updateTheme: ReturnType<typeof vi.fn>;
   write: ReturnType<typeof vi.fn>;
 };
 
@@ -31,6 +32,7 @@ function makePane(overrides: Partial<PaneState> = {}): PaneState {
     sessionId: "session:1",
     status: "running",
     output: "hello",
+    statusMessage: null,
     ...overrides,
   };
 }
@@ -64,6 +66,7 @@ describe("PaneTerminal", () => {
         onData: vi.fn(() => vi.fn()),
         reset: vi.fn(),
         syncSize: vi.fn(() => ({ cols: 120, rows: 32 })),
+        updateTheme: vi.fn(),
         write: vi.fn(),
       };
       terminals.push(terminal);
@@ -142,6 +145,7 @@ describe("PaneTerminal", () => {
         onData: vi.fn(() => vi.fn()),
         reset: vi.fn(),
         syncSize: vi.fn(() => null),
+        updateTheme: vi.fn(),
         write: vi.fn(),
       };
       terminals.push(terminal);

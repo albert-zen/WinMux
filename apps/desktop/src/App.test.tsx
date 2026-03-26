@@ -183,7 +183,7 @@ describe("App", () => {
 
   it("renders without crashing", () => {
     render(<App />);
-    expect(screen.getByText("inbox")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Close workspace inbox" })).toBeTruthy();
   });
 
   it("shows and dismisses the error banner", () => {

@@ -17,6 +17,7 @@ function makeWorkspace(id: string, name: string, rootDir: string): WorkspaceStat
         sessionId: `${id}-session`,
         status: "running",
         output: "",
+        statusMessage: null,
       },
     },
     unreadNotificationCount: 0,

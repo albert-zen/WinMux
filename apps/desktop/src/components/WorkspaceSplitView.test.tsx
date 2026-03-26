@@ -15,6 +15,7 @@ function makePane(id: string, overrides: Partial<PaneState> = {}): PaneState {
     sessionId: `session:${id}`,
     status: "running",
     output: "",
+    statusMessage: null,
     ...overrides,
   };
 }
