@@ -41,7 +41,36 @@ vi.mock("./components/WorkspaceSidebar", () => ({
 }));
 
 vi.mock("./components/CreateWorkspaceModal", () => ({
-  CreateWorkspaceModal: vi.fn(() => null),
+  CreateWorkspaceModal: vi.fn(
+    ({
+      isOpen,
+      onClose,
+      onCreate,
+    }: {
+      isOpen: boolean;
+      onClose: () => void;
+      onCreate: (config: { name: string; rootDir: string; shellProfile: string }) => void;
+    }) =>
+      isOpen ? (
+        <div role="dialog" aria-label="New Workspace" data-testid="create-workspace-modal">
+          <button
+            type="button"
+            onClick={() =>
+              onCreate({
+                name: "alpha",
+                rootDir: "D:\\dev\\alpha",
+                shellProfile: "pwsh",
+              })
+            }
+          >
+            Submit workspace
+          </button>
+          <button type="button" onClick={onClose}>
+            Cancel workspace
+          </button>
+        </div>
+      ) : null,
+  ),
 }));
 
 vi.mock("./components/StatusBar", () => ({
@@ -312,5 +341,25 @@ describe("App", () => {
       expect(openPath).toHaveBeenCalledWith("D:\\dev\\inbox");
     });
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("D:\\dev\\inbox");
+  });
+
+  it("creates a workspace from the modal, closes the modal, and activates the new workspace", async () => {
+    render(<App />);
+
+    fireEvent.keyDown(document.body, { key: "n", ctrlKey: true });
+    expect(screen.getByTestId("create-workspace-modal")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Submit workspace" }));
+
+    await waitFor(() => {
+      expect(workspaceCreate).toHaveBeenCalledWith({
+        name: "alpha",
+        rootDir: "D:\\dev\\alpha",
+        shellProfile: "pwsh",
+      });
+    });
+
+    expect(screen.queryByTestId("create-workspace-modal")).toBeNull();
+    expect(screen.getByText("alpha")).toBeTruthy();
   });
 });

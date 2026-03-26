@@ -685,9 +685,25 @@ button {
   font-size: 13px;
 }
 
-.modal-content input:focus {
+.modal-content select {
+  background: #0d0d0d;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #f0f0f0;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.modal-content input:focus,
+.modal-content select:focus {
   outline: none;
   border-color: #3b82f6;
+}
+
+.modal-directory-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
 }
 
 .modal-actions {

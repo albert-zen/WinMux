@@ -19,6 +19,14 @@ export function workspaceCreate(payload: {
   return invoke("workspace_create", payload);
 }
 
+export function pickWorkspaceDirectory(defaultPath?: string): Promise<string | null> {
+  return invoke("pick_workspace_directory", { defaultPath });
+}
+
+export function workspaceDirectoryExists(rootDir: string): Promise<boolean> {
+  return invoke("workspace_directory_exists", { rootDir });
+}
+
 export function paneSplit(
   workspaceId: string,
   paneId: string,
