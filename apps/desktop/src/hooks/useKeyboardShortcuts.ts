@@ -1,13 +1,14 @@
 import { useEffect } from "react";
-import { paneClose } from "../lib/desktopClient";
 
 type KeyboardShortcutsConfig = {
   workspace: {
     id: string;
     focusedPaneId: string;
   } | null;
+  isModalOpen?: boolean;
   onSplitVertical: () => void;
   onSplitHorizontal: () => void;
+  onCloseFocusedPane: () => void;
   onNewWorkspace: () => void;
   onWorkspaceJump: (index: number) => void;
   onWorkspaceCycle: (direction: "forward" | "backward") => void;
@@ -15,21 +16,28 @@ type KeyboardShortcutsConfig = {
   onToggleSidebar: () => void;
 };
 
-function isShortcutTargetInTerminal(event: KeyboardEvent): boolean {
+function getShortcutTargetContext(event: KeyboardEvent) {
   const targetElement = event.target instanceof Element ? event.target : null;
-  return (
-    targetElement?.closest(".xterm") !== null ||
-    targetElement?.tagName === "TEXTAREA" ||
-    targetElement?.tagName === "SELECT" ||
-    targetElement?.tagName === "INPUT"
-  );
+  const isInTerminal = targetElement?.closest(".xterm") !== null;
+  const isTextEntry =
+    !isInTerminal &&
+    (targetElement?.tagName === "TEXTAREA" ||
+      targetElement?.tagName === "SELECT" ||
+      targetElement?.tagName === "INPUT");
+
+  return {
+    isInTerminal,
+    isTextEntry,
+  };
 }
 
 export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
   const {
     workspace,
+    isModalOpen = false,
     onSplitVertical,
     onSplitHorizontal,
+    onCloseFocusedPane,
     onNewWorkspace,
     onWorkspaceJump,
     onWorkspaceCycle,
@@ -39,16 +47,23 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (isModalOpen) {
+        return;
+      }
+
       const key = event.key.toLowerCase();
-      const isInTerminal = isShortcutTargetInTerminal(event);
+      const { isInTerminal, isTextEntry } = getShortcutTargetContext(event);
 
       if (event.ctrlKey && event.shiftKey) {
         if (event.key === "Tab") {
-          if (isInTerminal) {
+          if (isTextEntry) {
             return;
           }
 
           event.preventDefault();
+          if (isInTerminal) {
+            event.stopPropagation();
+          }
           onWorkspaceCycle("backward");
           return;
         }
@@ -68,14 +83,30 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
             }
 
             event.preventDefault();
-            paneClose(workspace.id, workspace.focusedPaneId).catch(() => {
-              // Error surfaces in the owning view.
-            });
+            if (isInTerminal) {
+              event.stopPropagation();
+            }
+            onCloseFocusedPane();
             return;
         }
       }
 
-      if (isInTerminal) {
+      if (isInTerminal || isTextEntry) {
+        if (
+          isInTerminal &&
+          event.ctrlKey &&
+          !event.shiftKey &&
+          !event.altKey &&
+          (key === "k" || event.key === "Tab")
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (key === "k") {
+            onOpenQuickSwitcher();
+          } else {
+            onWorkspaceCycle("forward");
+          }
+        }
         return;
       }
 
@@ -120,11 +151,13 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
       }
     };
 
-    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown, true);
     return () => {
-      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("keydown", handleKeyDown, true);
     };
   }, [
+    isModalOpen,
+    onCloseFocusedPane,
     onNewWorkspace,
     onOpenQuickSwitcher,
     onSplitHorizontal,

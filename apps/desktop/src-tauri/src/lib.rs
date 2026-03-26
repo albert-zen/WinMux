@@ -362,6 +362,7 @@ fn workspace_create(
         let result = response.result().cloned().unwrap_or_else(|| json!({}));
         if let Some(ws_id) = result["workspaceId"].as_str() {
             let _ = app_handle.emit(DOMAIN_EVENT_NAME, DomainEvent::workspace_created(ws_id));
+            let _ = app_handle.emit(DOMAIN_EVENT_NAME, DomainEvent::workspace_activated(ws_id));
         }
         Ok(result)
     } else {
@@ -542,6 +543,10 @@ fn workspace_close(
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
+    let previous_active_workspace_id = {
+        let runtime = state.runtime.lock().unwrap();
+        runtime.active_workspace_id.clone()
+    };
     let request = RequestEnvelope::new(
         "desktop-workspace-close",
         "workspace.close",
@@ -551,9 +556,15 @@ fn workspace_close(
     );
     let response = dispatch_runtime_request(&request, &mut state.runtime.lock().unwrap());
     if response.is_ok() {
-        let _ = app_handle.emit(
-            DOMAIN_EVENT_NAME,
-            DomainEvent::workspace_closed(&workspace_id),
+        let next_active_workspace_id = {
+            let runtime = state.runtime.lock().unwrap();
+            runtime.active_workspace_id.clone()
+        };
+        let _ = emit_workspace_close_events(
+            |event| app_handle.emit(DOMAIN_EVENT_NAME, event).map_err(|error| error.to_string()),
+            &workspace_id,
+            previous_active_workspace_id.as_deref(),
+            next_active_workspace_id.as_deref(),
         );
         Ok(())
     } else {
@@ -562,6 +573,26 @@ fn workspace_close(
             .map(|error| error.message.clone())
             .unwrap_or_else(|| "workspace close failed".to_string()))
     }
+}
+
+fn emit_workspace_close_events<Emit>(
+    mut emit: Emit,
+    closed_workspace_id: &str,
+    previous_active_workspace_id: Option<&str>,
+    next_active_workspace_id: Option<&str>,
+) -> Result<(), String>
+where
+    Emit: FnMut(DomainEvent) -> Result<(), String>,
+{
+    emit(DomainEvent::workspace_closed(closed_workspace_id))?;
+
+    if previous_active_workspace_id == Some(closed_workspace_id) {
+        if let Some(next_active_workspace_id) = next_active_workspace_id {
+            emit(DomainEvent::workspace_activated(next_active_workspace_id))?;
+        }
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -1070,6 +1101,7 @@ where
         default_terminal_size(),
     ) {
         Ok(session_id) => {
+            runtime.active_workspace_id = Some(workspace_id.clone());
             runtime.clear_pane_error(&workspace_id, &pane_id);
             runtime.save_registry();
             ResponseEnvelope::success(
@@ -1087,14 +1119,9 @@ where
                 error.to_string(),
             );
             runtime.save_registry();
-            ResponseEnvelope::success(
+            ResponseEnvelope::error(
                 request.id(),
-                json!({
-                    "workspaceId": workspace_id,
-                    "paneId": pane_id,
-                    "sessionId": Option::<String>::None,
-                    "error": error.to_string(),
-                }),
+                ProtocolError::new(ErrorCode::Conflict, error.to_string()),
             )
         }
     }
@@ -1209,15 +1236,11 @@ where
                 (workspace_id.clone(), pane_id.clone()),
                 error.to_string(),
             );
+            rollback_split_panes(&mut runtime.registry, &workspace_id, &existing_pane_ids);
             runtime.save_registry();
-            ResponseEnvelope::success(
+            ResponseEnvelope::error(
                 request.id(),
-                json!({
-                    "workspaceId": workspace_id,
-                    "newPaneId": pane_id,
-                    "sessionId": Option::<String>::None,
-                    "error": error.to_string(),
-                }),
+                ProtocolError::new(ErrorCode::Conflict, error.to_string()),
             )
         }
     }
@@ -1935,6 +1958,7 @@ mod tests {
             .find(|workspace| workspace.id == workspace_id)
             .unwrap();
         assert_eq!(workspace.shell_profile, "pwsh");
+        assert_eq!(runtime.active_workspace_id.as_deref(), Some(workspace_id));
         assert_eq!(
             factory.state.lock().unwrap().spawn_working_dirs.last().cloned(),
             Some(Some("D:\\dev\\api".to_string()))
@@ -1971,23 +1995,33 @@ mod tests {
         );
 
         let response: ResponseEnvelope = serde_json::from_str(&raw).unwrap();
-        assert!(response.is_ok());
-        let result = response.result().unwrap();
-        let workspace_id = result["workspaceId"].as_str().unwrap();
-        let pane_id = result["paneId"].as_str().unwrap();
-        assert!(result["sessionId"].is_null());
+        assert!(!response.is_ok());
+        let workspace_id = runtime
+            .registry
+            .list()
+            .iter()
+            .find(|workspace| workspace.name == "api")
+            .map(|workspace| workspace.id.clone())
+            .unwrap();
+        let pane_id = runtime
+            .registry
+            .list()
+            .iter()
+            .find(|workspace| workspace.id == workspace_id)
+            .and_then(|workspace| workspace.layout.panes().first().map(|pane| pane.pane_id.clone()))
+            .unwrap();
 
         let snapshot = runtime.snapshot();
         let workspace = snapshot
             .workspaces
             .iter()
-            .find(|workspace| workspace.id == workspace_id)
+            .find(|workspace| workspace.id == workspace_id.as_str())
             .unwrap();
         assert_eq!(
-            workspace.pane_states[pane_id].status_message.as_deref(),
+            workspace.pane_states[&pane_id].status_message.as_deref(),
             Some("working directory not found: D:\\missing\\api")
         );
-        assert_eq!(workspace.pane_states[pane_id].status, "none");
+        assert_eq!(workspace.pane_states[&pane_id].status, "none");
     }
 
     #[test]
@@ -2063,16 +2097,103 @@ mod tests {
         );
 
         let response: ResponseEnvelope = serde_json::from_str(&raw).unwrap();
-        assert!(response.is_ok());
-        assert!(response.result().unwrap()["sessionId"].is_null());
+        assert!(!response.is_ok());
 
         let snapshot = runtime.snapshot();
-        assert_eq!(snapshot.workspaces[0].pane_states.len(), 2);
-        assert_eq!(
-            snapshot.workspaces[0].pane_states["pane-2"].status_message.as_deref(),
-            Some("working directory not found: D:\\dev\\inbox")
+        assert_eq!(snapshot.workspaces[0].pane_states.len(), 1);
+        assert!(snapshot.workspaces[0].pane_states.get("pane-2").is_none());
+        assert!(
+            runtime
+                .registry
+                .list()
+                .first()
+                .map(|workspace| workspace.layout.panes().iter().all(|pane| pane.pane_id != "pane-2"))
+                .unwrap_or(false)
         );
-        assert_eq!(snapshot.workspaces[0].pane_states["pane-2"].status, "none");
+        assert_eq!(runtime.sessions.session_id_for_pane("ws-inbox", "pane-2"), None);
+    }
+
+    #[test]
+    fn handle_runtime_request_workspace_create_persists_created_workspace_as_active() {
+        let state_path = unique_state_path("create-active");
+        let mut runtime = RuntimeState::new_with_state_path(
+            core_state::starter_workspace_registry(),
+            FakeFactory::default(),
+            state_path.clone(),
+        );
+
+        let raw = handle_runtime_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req-create",
+                "type": "command",
+                "command": "workspace.create",
+                "payload": {
+                    "name": "api",
+                    "rootDir": "D:\\dev\\api",
+                    "shellProfile": "pwsh"
+                }
+            }"#,
+            &mut runtime,
+        );
+
+        let response: ResponseEnvelope = serde_json::from_str(&raw).unwrap();
+        assert!(response.is_ok());
+        let workspace_id = response.result().unwrap()["workspaceId"].as_str().unwrap();
+        assert_eq!(runtime.active_workspace_id.as_deref(), Some(workspace_id));
+
+        let (_registry, restored_active_id) = load_registry_from_state_path(&state_path);
+        assert_eq!(restored_active_id.as_deref(), Some(workspace_id));
+
+        let _ = fs::remove_file(state_path);
+    }
+
+    #[test]
+    fn handle_runtime_request_pane_split_rolls_back_failed_pane_creation() {
+        let factory = FakeFactory::default();
+        let mut runtime = test_runtime_with_factory(factory.clone());
+        factory
+            .state
+            .lock()
+            .unwrap()
+            .fail_working_dirs
+            .insert(
+                "D:\\dev\\inbox".to_string(),
+                "working directory not found: D:\\dev\\inbox".to_string(),
+            );
+
+        let raw = handle_runtime_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req-split-fail",
+                "type": "command",
+                "command": "pane.split",
+                "payload": {
+                    "workspaceId": "ws-inbox",
+                    "paneId": "pane-1",
+                    "newPaneId": "pane-2",
+                    "orientation": "vertical",
+                    "ratio": 0.5
+                }
+            }"#,
+            &mut runtime,
+        );
+
+        let response: ResponseEnvelope = serde_json::from_str(&raw).unwrap();
+        assert!(!response.is_ok());
+
+        let snapshot = runtime.snapshot();
+        assert_eq!(snapshot.workspaces[0].pane_states.len(), 1);
+        assert!(snapshot.workspaces[0].pane_states.get("pane-2").is_none());
+        assert_eq!(
+            runtime
+                .registry
+                .list()
+                .first()
+                .map(|workspace| workspace.layout.panes().len())
+                .unwrap_or_default(),
+            1
+        );
         assert_eq!(runtime.sessions.session_id_for_pane("ws-inbox", "pane-2"), None);
     }
 
@@ -3115,6 +3236,28 @@ mod tests {
         assert_eq!(restored_active_id, Some("ws-inbox".to_string()));
 
         let _ = fs::remove_file(state_path);
+    }
+
+    #[test]
+    fn emit_workspace_close_events_emits_workspace_activated_when_active_workspace_falls_back() {
+        let mut events = Vec::<Value>::new();
+
+        emit_workspace_close_events(
+            |event| {
+                events.push(serde_json::to_value(event).unwrap());
+                Ok(())
+            },
+            "ws-api",
+            Some("ws-api"),
+            Some("ws-inbox"),
+        )
+        .unwrap();
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0]["type"], "workspaceClosed");
+        assert_eq!(events[0]["workspaceId"], "ws-api");
+        assert_eq!(events[1]["type"], "workspaceActivated");
+        assert_eq!(events[1]["workspaceId"], "ws-inbox");
     }
 
     #[test]

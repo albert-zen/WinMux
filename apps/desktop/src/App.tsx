@@ -78,6 +78,7 @@ function App() {
   });
   const sidebarDragStartX = useRef(0);
   const sidebarDragStartWidth = useRef(SIDEBAR_WIDTH_DEFAULT);
+  const quickSwitcherReturnFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     const nextWorkspaces = state?.workspaces ?? [];
@@ -241,13 +242,15 @@ function App() {
 
   const handleWorkspaceSelect = useCallback(
     (workspaceId: string) => {
+      if (workspaceId === activeWorkspaceId) {
+        return;
+      }
+
       setActiveWorkspaceId(workspaceId);
       touchWorkspace(workspaceId);
-      setIsQuickSwitcherOpen(false);
-      bumpFocusNonce();
       void setActiveWorkspace(workspaceId);
     },
-    [touchWorkspace],
+    [activeWorkspaceId, touchWorkspace],
   );
 
   const handleCreateWorkspace = async (config: {
@@ -459,6 +462,50 @@ function App() {
     void navigator.clipboard.writeText(workspace.rootDir);
   }, [workspace]);
 
+  const handleOpenQuickSwitcher = useCallback(() => {
+    const activeElement =
+      typeof document !== "undefined" && document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    quickSwitcherReturnFocusRef.current = activeElement;
+    setIsQuickSwitcherOpen(true);
+  }, []);
+
+  const handleQuickSwitcherClose = useCallback(() => {
+    setIsQuickSwitcherOpen(false);
+    const returnFocusElement = quickSwitcherReturnFocusRef.current;
+    quickSwitcherReturnFocusRef.current = null;
+    if (!returnFocusElement?.isConnected) {
+      return;
+    }
+
+    const restoreFocus = () => {
+      if (returnFocusElement.isConnected) {
+        returnFocusElement.focus();
+      }
+    };
+
+    if (typeof queueMicrotask === "function") {
+      queueMicrotask(restoreFocus);
+      return;
+    }
+
+    if (typeof window !== "undefined") {
+      window.setTimeout(restoreFocus, 0);
+      return;
+    }
+
+    restoreFocus();
+  }, []);
+
+  const handleCloseFocusedPane = useCallback(() => {
+    if (!workspace) {
+      return;
+    }
+
+    handleClosePane(workspace.focusedPaneId);
+  }, [workspace]);
+
   useKeyboardShortcuts({
     workspace: workspace
       ? {
@@ -466,12 +513,14 @@ function App() {
           focusedPaneId: workspace.focusedPaneId,
         }
       : null,
+    isModalOpen: confirmation !== null || isCreateModalOpen || isQuickSwitcherOpen,
     onSplitVertical: () => handleSplit("vertical"),
     onSplitHorizontal: () => handleSplit("horizontal"),
+    onCloseFocusedPane: handleCloseFocusedPane,
     onNewWorkspace: () => setIsCreateModalOpen(true),
     onWorkspaceJump: handleWorkspaceJump,
     onWorkspaceCycle: handleWorkspaceCycle,
-    onOpenQuickSwitcher: () => setIsQuickSwitcherOpen(true),
+    onOpenQuickSwitcher: handleOpenQuickSwitcher,
     onToggleSidebar: () => {},
   });
 
@@ -605,7 +654,7 @@ function App() {
         mru={mru}
         activeWorkspaceId={activeWorkspaceId}
         onSelect={handleWorkspaceSelect}
-        onClose={() => setIsQuickSwitcherOpen(false)}
+        onClose={handleQuickSwitcherClose}
       />
 
       <CreateWorkspaceModal

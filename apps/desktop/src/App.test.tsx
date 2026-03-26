@@ -311,6 +311,20 @@ describe("App", () => {
     });
   });
 
+  it("treats selecting the already active workspace in the quick switcher as a no-op", async () => {
+    render(<App />);
+
+    fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Switch workspace" }), {
+      key: "Enter",
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("textbox", { name: "Switch workspace" })).toBeNull();
+    });
+    expect(setActiveWorkspace).not.toHaveBeenCalled();
+  });
+
   it("cycles MRU workspaces on Ctrl+Tab and persists the updated order", async () => {
     vi.mocked(useDesktopState).mockReturnValue(
       makeState([
@@ -360,6 +374,6 @@ describe("App", () => {
     });
 
     expect(screen.queryByTestId("create-workspace-modal")).toBeNull();
-    expect(screen.getByText("alpha")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Close workspace alpha" })).toBeTruthy();
   });
 });

@@ -23,6 +23,7 @@ describe("useKeyboardShortcuts", () => {
       id: "ws-1",
       focusedPaneId: "pane-1",
     },
+    onCloseFocusedPane: vi.fn(),
     onSplitVertical: vi.fn(),
     onSplitHorizontal: vi.fn(),
     onNewWorkspace: vi.fn(),
@@ -74,7 +75,7 @@ describe("useKeyboardShortcuts", () => {
     expect(mockConfig.onWorkspaceJump).toHaveBeenCalledWith(8);
   });
 
-  it("does not trigger non-global shortcuts when inside terminal", () => {
+  it("still opens the quick switcher when terminal is focused", () => {
     renderHook(() => useKeyboardShortcuts(mockConfig));
 
     // Create a mock terminal element
@@ -87,9 +88,9 @@ describe("useKeyboardShortcuts", () => {
     terminal.appendChild(input);
     input.focus();
 
-    // Ctrl+K should not work inside terminal (non-global)
+    // Ctrl+K should still work inside terminal so switching remains reachable.
     fireKeyDown("k", { ctrlKey: true }, input);
-    expect(mockConfig.onOpenQuickSwitcher).not.toHaveBeenCalled();
+    expect(mockConfig.onOpenQuickSwitcher).toHaveBeenCalled();
 
     // But Ctrl+Shift+D should work (global shortcut)
     fireKeyDown("d", { ctrlKey: true, shiftKey: true }, input);
@@ -98,7 +99,7 @@ describe("useKeyboardShortcuts", () => {
     document.body.removeChild(terminal);
   });
 
-  it("does not trigger MRU shortcuts when inside terminal", () => {
+  it("still cycles MRU shortcuts when terminal is focused", () => {
     renderHook(() => useKeyboardShortcuts(mockConfig));
 
     // Create a mock terminal element
@@ -111,9 +112,37 @@ describe("useKeyboardShortcuts", () => {
     terminal.appendChild(input);
     input.focus();
 
-    // Ctrl+Tab should not work inside terminal (non-global)
+    // Ctrl+Tab and Ctrl+Shift+Tab should still work inside terminal.
     fireKeyDown("Tab", { ctrlKey: true }, input);
-    expect(mockConfig.onWorkspaceCycle).not.toHaveBeenCalled();
+    fireKeyDown("Tab", { ctrlKey: true, shiftKey: true }, input);
+    expect(mockConfig.onWorkspaceCycle).toHaveBeenNthCalledWith(1, "forward");
+    expect(mockConfig.onWorkspaceCycle).toHaveBeenNthCalledWith(2, "backward");
+
+    document.body.removeChild(terminal);
+  });
+
+  it("intercepts terminal-focused switching shortcuts before the shell receives them", () => {
+    renderHook(() => useKeyboardShortcuts(mockConfig));
+
+    const terminal = document.createElement("div");
+    terminal.className = "xterm";
+    document.body.appendChild(terminal);
+
+    const input = document.createElement("input");
+    terminal.appendChild(input);
+    input.focus();
+
+    const shellListener = vi.fn();
+    input.addEventListener("keydown", shellListener);
+
+    fireKeyDown("k", { ctrlKey: true }, input);
+    fireKeyDown("Tab", { ctrlKey: true }, input);
+    fireKeyDown("Tab", { ctrlKey: true, shiftKey: true }, input);
+
+    expect(mockConfig.onOpenQuickSwitcher).toHaveBeenCalledTimes(1);
+    expect(mockConfig.onWorkspaceCycle).toHaveBeenNthCalledWith(1, "forward");
+    expect(mockConfig.onWorkspaceCycle).toHaveBeenNthCalledWith(2, "backward");
+    expect(shellListener).not.toHaveBeenCalled();
 
     document.body.removeChild(terminal);
   });
@@ -150,5 +179,13 @@ describe("useKeyboardShortcuts", () => {
 
     fireKeyDown("k", { ctrlKey: true });
     expect(mockConfig.onOpenQuickSwitcher).not.toHaveBeenCalled();
+  });
+
+  it("routes Ctrl+Shift+W through the focused-pane close callback", () => {
+    renderHook(() => useKeyboardShortcuts(mockConfig));
+
+    fireKeyDown("w", { ctrlKey: true, shiftKey: true });
+
+    expect(mockConfig.onCloseFocusedPane).toHaveBeenCalledTimes(1);
   });
 });
