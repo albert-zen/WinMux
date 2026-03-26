@@ -1,8 +1,10 @@
-import type { WorkspaceState } from "@cmux-win/protocol";
+import { type PaneStatus, type WorkspaceState } from "@cmux-win/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { CreateWorkspaceModal } from "./components/CreateWorkspaceModal";
+import { InlineFeedback } from "./components/InlineFeedback";
+import { SafetyConfirmDialog } from "./components/SafetyConfirmDialog";
 import { StatusBar } from "./components/StatusBar";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { WorkspaceSplitView } from "./components/WorkspaceSplitView";
@@ -16,6 +18,7 @@ import {
   paneSplit,
   sessionRestart,
   setActiveWorkspace,
+  workspaceClose,
   workspaceCreate,
 } from "./lib/desktopClient";
 import "./App.css";
@@ -25,8 +28,23 @@ const SIDEBAR_WIDTH_MIN = 140;
 const SIDEBAR_WIDTH_MAX = 440;
 const SIDEBAR_WIDTH_KEY = "cmux.sidebarWidth";
 
+type WorkspaceErrorKey = "split" | "workspaceClose";
+type WorkspaceErrors = Record<WorkspaceErrorKey, string | null>;
+type ConfirmationState =
+  | null
+  | { type: "workspaceClose"; workspaceId: string; workspaceName: string }
+  | { type: "paneClose"; workspaceId: string; paneId: string };
+
 function clampSidebarWidth(width: number): number {
   return Math.max(SIDEBAR_WIDTH_MIN, Math.min(SIDEBAR_WIDTH_MAX, width));
+}
+
+function isLivePane(status: PaneStatus): boolean {
+  return status === "starting" || status === "running";
+}
+
+function getPaneErrorKey(workspaceId: string, paneId: string): string {
+  return `${workspaceId}:${paneId}`;
 }
 
 function App() {
@@ -36,10 +54,13 @@ function App() {
   const [pendingWorkspace, setPendingWorkspace] = useState<WorkspaceState | null>(null);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
   const [focusNonce, setFocusNonce] = useState(0);
+  const [workspaceErrors, setWorkspaceErrors] = useState<WorkspaceErrors>({
+    split: null,
+    workspaceClose: null,
+  });
   const [createError, setCreateError] = useState<string | null>(null);
-  const [splitError, setSplitError] = useState<string | null>(null);
-  const [restartError, setRestartError] = useState<string | null>(null);
-  const [paneCloseError, setPaneCloseError] = useState<string | null>(null);
+  const [paneErrors, setPaneErrors] = useState<Record<string, string>>({});
+  const [confirmation, setConfirmation] = useState<ConfirmationState>(null);
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isQuickSwitcherOpen, setIsQuickSwitcherOpen] = useState(false);
@@ -48,7 +69,11 @@ function App() {
     if (typeof window === "undefined") {
       return SIDEBAR_WIDTH_DEFAULT;
     }
-    const candidate = Number.parseInt(window.localStorage.getItem(SIDEBAR_WIDTH_KEY) ?? "", 10);
+
+    const candidate = Number.parseInt(
+      window.localStorage.getItem(SIDEBAR_WIDTH_KEY) ?? "",
+      10,
+    );
     return clampSidebarWidth(Number.isFinite(candidate) ? candidate : SIDEBAR_WIDTH_DEFAULT);
   });
   const sidebarDragStartX = useRef(0);
@@ -79,9 +104,8 @@ function App() {
     const serverActiveId = state?.activeWorkspaceId;
     const fallbackWorkspace =
       pendingWorkspace ??
-      (serverActiveId && nextWorkspaces.find((ws) => ws.id === serverActiveId)) ??
+      (serverActiveId && nextWorkspaces.find((entry) => entry.id === serverActiveId)) ??
       nextWorkspaces[0];
-
     if (!fallbackWorkspace) {
       return;
     }
@@ -101,10 +125,10 @@ function App() {
     }
 
     const onMouseMove = (event: MouseEvent) => {
-      const next = clampSidebarWidth(
+      const nextWidth = clampSidebarWidth(
         sidebarDragStartWidth.current + (event.clientX - sidebarDragStartX.current),
       );
-      setSidebarWidth(next);
+      setSidebarWidth(nextWidth);
     };
     const onMouseUp = () => {
       setIsSidebarResizing(false);
@@ -117,6 +141,10 @@ function App() {
       window.removeEventListener("mouseup", onMouseUp);
     };
   }, [isSidebarResizing]);
+
+  useEffect(() => {
+    setBannerDismissed(false);
+  }, [error]);
 
   const handleSidebarResizeStart = useCallback(
     (event: ReactMouseEvent) => {
@@ -136,17 +164,27 @@ function App() {
     ["--sidebar-width" as string]: `${sidebarWidth}px`,
   };
 
+  const resolvedWorkspaces = state?.workspaces ?? [];
   const workspaces =
-    pendingWorkspace && !state?.workspaces.some((entry) => entry.id === pendingWorkspace.id)
-      ? [...(state?.workspaces ?? []), pendingWorkspace]
-      : (state?.workspaces ?? []);
+    pendingWorkspace && !resolvedWorkspaces.some((entry) => entry.id === pendingWorkspace.id)
+      ? [...resolvedWorkspaces, pendingWorkspace]
+      : resolvedWorkspaces;
 
   const notificationCounts = Object.fromEntries(
-    workspaces.map((ws) => [ws.id, ws.unreadNotificationCount ?? 0]),
+    workspaces.map((workspace) => [workspace.id, workspace.unreadNotificationCount ?? 0]),
   );
 
   const workspace =
     workspaces.find((entry) => entry.id === activeWorkspaceId) ?? workspaces[0] ?? null;
+  const focusedPane = workspace?.paneStates[workspace.focusedPaneId] ?? null;
+  const activePaneErrors = workspace
+    ? Object.fromEntries(
+        Object.keys(workspace.paneStates).flatMap((paneId) => {
+          const message = paneErrors[getPaneErrorKey(workspace.id, paneId)];
+          return message ? [[paneId, message]] : [];
+        }),
+      )
+    : {};
 
   useEffect(() => {
     if (workspace) {
@@ -163,12 +201,54 @@ function App() {
     }
   }, [mru, removeWorkspace, workspaces]);
 
-  const handleWorkspaceSelect = (workspaceId: string) => {
-    setActiveWorkspaceId(workspaceId);
-    touchWorkspace(workspaceId);
-    setFocusNonce((prev) => prev + 1);
-    void setActiveWorkspace(workspaceId);
+  const clearWorkspaceError = (key: WorkspaceErrorKey) => {
+    setWorkspaceErrors((prev) => ({ ...prev, [key]: null }));
   };
+
+  const clearPaneError = (workspaceId: string, paneId: string) => {
+    const key = getPaneErrorKey(workspaceId, paneId);
+    setPaneErrors((prev) => {
+      if (!(key in prev)) {
+        return prev;
+      }
+
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
+
+  const setPaneErrorMessage = (workspaceId: string, paneId: string, message: string | null) => {
+    const key = getPaneErrorKey(workspaceId, paneId);
+    setPaneErrors((prev) => {
+      if (message === null) {
+        if (!(key in prev)) {
+          return prev;
+        }
+
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      }
+
+      return { ...prev, [key]: message };
+    });
+  };
+
+  const bumpFocusNonce = () => {
+    setFocusNonce((prev) => prev + 1);
+  };
+
+  const handleWorkspaceSelect = useCallback(
+    (workspaceId: string) => {
+      setActiveWorkspaceId(workspaceId);
+      touchWorkspace(workspaceId);
+      setIsQuickSwitcherOpen(false);
+      bumpFocusNonce();
+      void setActiveWorkspace(workspaceId);
+    },
+    [touchWorkspace],
+  );
 
   const handleCreateWorkspace = async (config: {
     name: string;
@@ -197,28 +277,63 @@ function App() {
             sessionId: result.sessionId,
             status: "starting",
             output: "",
+            statusMessage: null,
           },
         },
         unreadNotificationCount: 0,
       });
       setActiveWorkspaceId(result.workspaceId);
       touchWorkspace(result.workspaceId);
-      setFocusNonce((prev) => prev + 1);
+      bumpFocusNonce();
       setIsCreateModalOpen(false);
     } catch (reason) {
       setCreateError(reason instanceof Error ? reason.message : String(reason));
     }
   };
 
+  const performPaneClose = (workspaceId: string, paneId: string) => {
+    setPaneErrorMessage(workspaceId, paneId, null);
+    return paneClose(workspaceId, paneId).catch((reason) => {
+      setPaneErrorMessage(
+        workspaceId,
+        paneId,
+        reason instanceof Error ? reason.message : String(reason),
+      );
+    });
+  };
+
+  const performWorkspaceClose = async (workspaceId: string) => {
+    setWorkspaceErrors((prev) => ({ ...prev, workspaceClose: null }));
+
+    try {
+      await workspaceClose(workspaceId);
+      removeWorkspace(workspaceId);
+      if (workspaceId === activeWorkspaceId) {
+        const remaining = workspaces.filter((entry) => entry.id !== workspaceId);
+        setActiveWorkspaceId(remaining[0]?.id ?? null);
+        if (remaining[0]) {
+          bumpFocusNonce();
+        }
+      }
+    } catch (reason) {
+      setWorkspaceErrors((prev) => ({
+        ...prev,
+        workspaceClose: reason instanceof Error ? reason.message : String(reason),
+      }));
+    }
+  };
+
   const handleSplit = (direction: "vertical" | "horizontal" = "vertical") => {
-    const focusedPane = workspace?.paneStates[workspace.focusedPaneId] ?? null;
     if (!workspace || !focusedPane) {
       return;
     }
 
-    setSplitError(null);
+    setWorkspaceErrors((prev) => ({ ...prev, split: null }));
     paneSplit(workspace.id, focusedPane.paneId, direction).catch((reason) => {
-      setSplitError(reason instanceof Error ? reason.message : String(reason));
+      setWorkspaceErrors((prev) => ({
+        ...prev,
+        split: reason instanceof Error ? reason.message : String(reason),
+      }));
     });
   };
 
@@ -226,34 +341,79 @@ function App() {
     if (!workspace) {
       return;
     }
+
     void paneFocus(workspace.id, paneId);
   };
 
-  const handleClose = (paneId: string) => {
+  const handleClosePane = (paneId: string) => {
     if (!workspace) {
       return;
     }
-    setPaneCloseError(null);
-    paneClose(workspace.id, paneId).catch((reason) => {
-      setPaneCloseError(reason instanceof Error ? reason.message : String(reason));
-    });
+
+    const pane = workspace.paneStates[paneId];
+    if (pane && isLivePane(pane.status)) {
+      setConfirmation({ type: "paneClose", workspaceId: workspace.id, paneId });
+      return;
+    }
+
+    void performPaneClose(workspace.id, paneId);
+  };
+
+  const handleCloseWorkspace = async (workspaceId: string) => {
+    const targetWorkspace = workspaces.find((entry) => entry.id === workspaceId) ?? null;
+    const hasLivePane = targetWorkspace
+      ? Object.values(targetWorkspace.paneStates).some((pane) => isLivePane(pane.status))
+      : false;
+
+    if (targetWorkspace && hasLivePane) {
+      setConfirmation({
+        type: "workspaceClose",
+        workspaceId,
+        workspaceName: targetWorkspace.name,
+      });
+      return;
+    }
+
+    await performWorkspaceClose(workspaceId);
   };
 
   const handleRestartPane = (paneId: string) => {
     const pane = workspace?.paneStates[paneId] ?? null;
-    if (!pane?.sessionId) {
+    if (!workspace || !pane?.sessionId) {
       return;
     }
 
-    setRestartError(null);
+    setPaneErrorMessage(workspace.id, paneId, null);
     sessionRestart(pane.sessionId).catch((reason) => {
-      setRestartError(reason instanceof Error ? reason.message : String(reason));
+      setPaneErrorMessage(
+        workspace.id,
+        paneId,
+        reason instanceof Error ? reason.message : String(reason),
+      );
     });
   };
 
-  useEffect(() => {
-    setBannerDismissed(false);
-  }, [error]);
+  const handleConfirm = () => {
+    if (!confirmation) {
+      return;
+    }
+
+    if (confirmation.type === "workspaceClose") {
+      void performWorkspaceClose(confirmation.workspaceId);
+    } else {
+      void performPaneClose(confirmation.workspaceId, confirmation.paneId);
+    }
+
+    setConfirmation(null);
+  };
+
+  const handleDismissPaneError = (paneId: string) => {
+    if (!workspace) {
+      return;
+    }
+
+    clearPaneError(workspace.id, paneId);
+  };
 
   const handleWorkspaceJump = useCallback(
     (index: number) => {
@@ -262,7 +422,7 @@ function App() {
         handleWorkspaceSelect(target.id);
       }
     },
-    [workspaces],
+    [handleWorkspaceSelect, workspaces],
   );
 
   const handleWorkspaceCycle = useCallback(
@@ -280,13 +440,14 @@ function App() {
         handleWorkspaceSelect(nextWorkspaceId);
       }
     },
-    [activeWorkspaceId, getNextInMru, getPreviousInMru],
+    [activeWorkspaceId, getNextInMru, getPreviousInMru, handleWorkspaceSelect],
   );
 
   const handleOpenRootDir = useCallback(() => {
     if (!workspace) {
       return;
     }
+
     void openPath(workspace.rootDir);
   }, [workspace]);
 
@@ -294,14 +455,9 @@ function App() {
     if (!workspace || typeof navigator === "undefined" || !navigator.clipboard) {
       return;
     }
+
     void navigator.clipboard.writeText(workspace.rootDir);
   }, [workspace]);
-
-  const showBanner = Boolean(error) && !bannerDismissed;
-  const totalNotifications = Object.values(notificationCounts).reduce((sum, count) => sum + count, 0);
-  const lastWorkspace = workspaces[workspaces.length - 1];
-  const defaultRootDir = lastWorkspace?.rootDir ?? "D:\\dev\\workspace";
-  const defaultShellProfile = lastWorkspace?.shellProfile ?? "cmd.exe";
 
   useKeyboardShortcuts({
     workspace: workspace
@@ -318,6 +474,24 @@ function App() {
     onOpenQuickSwitcher: () => setIsQuickSwitcherOpen(true),
     onToggleSidebar: () => {},
   });
+
+  const totalNotifications = Object.values(notificationCounts).reduce((sum, count) => sum + count, 0);
+  const lastWorkspace = workspaces[workspaces.length - 1];
+  const defaultRootDir = lastWorkspace?.rootDir ?? "D:\\dev\\workspace";
+  const defaultShellProfile = lastWorkspace?.shellProfile ?? "cmd.exe";
+  const workspaceFeedback = [
+    {
+      key: "split" as const,
+      message: workspaceErrors.split,
+      dismissLabel: "Dismiss split error",
+    },
+    {
+      key: "workspaceClose" as const,
+      message: workspaceErrors.workspaceClose,
+      dismissLabel: "Dismiss workspace close error",
+    },
+  ].filter((entry) => Boolean(entry.message));
+  const showBanner = Boolean(error) && !bannerDismissed;
 
   return (
     <main className="app-shell" style={shellStyle}>
@@ -352,29 +526,63 @@ function App() {
       />
 
       <section className="workspace-main">
-        {splitError ? (
-          <p className="operation-error" role="status">
-            {splitError}
-          </p>
+        {workspace ? (
+          <header className="workspace-toolbar">
+            <div className="workspace-toolbar-copy">
+              <strong>{workspace.name}</strong>
+              <span>{workspace.rootDir}</span>
+            </div>
+            <div className="workspace-toolbar-side">
+              <div className="workspace-toolbar-actions">
+                <button type="button" onClick={() => handleSplit("horizontal")}>
+                  Split horizontally
+                </button>
+                <button
+                  type="button"
+                  disabled={!focusedPane || focusedPane.status !== "exited"}
+                  onClick={() => focusedPane && handleRestartPane(focusedPane.paneId)}
+                >
+                  Restart focused pane
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Close workspace ${workspace.name}`}
+                  className="btn-secondary"
+                  onClick={() => void handleCloseWorkspace(workspace.id)}
+                >
+                  Close workspace
+                </button>
+              </div>
+              {workspaceFeedback.length > 0 ? (
+                <div className="workspace-toolbar-feedback">
+                  {workspaceFeedback.map((entry) =>
+                    entry.message ? (
+                      <InlineFeedback
+                        key={entry.key}
+                        dismissLabel={entry.dismissLabel}
+                        message={entry.message}
+                        onDismiss={() => clearWorkspaceError(entry.key)}
+                        role="status"
+                        tone="error"
+                      />
+                    ) : null,
+                  )}
+                </div>
+              ) : null}
+            </div>
+          </header>
         ) : null}
-        {restartError ? (
-          <p className="operation-error" role="status">
-            {restartError}
-          </p>
-        ) : null}
-        {paneCloseError ? (
-          <p className="operation-error" role="status">
-            {paneCloseError}
-          </p>
-        ) : null}
+
         {workspace ? (
           <WorkspaceSplitView
             key={`${workspace.id}:${focusNonce}`}
             workspace={workspace}
             activeTheme={state?.activeTheme}
             onFocusPane={handleFocus}
-            onClosePane={handleClose}
+            onClosePane={handleClosePane}
             onRestartPane={handleRestartPane}
+            paneErrors={activePaneErrors}
+            onDismissPaneError={handleDismissPaneError}
           />
         ) : (
           <div className="workspace-empty">
@@ -407,6 +615,27 @@ function App() {
         error={createError}
         defaultRootDir={defaultRootDir}
         defaultShellProfile={defaultShellProfile}
+      />
+
+      <SafetyConfirmDialog
+        isOpen={confirmation !== null}
+        title={
+          confirmation?.type === "workspaceClose"
+            ? `Close workspace ${confirmation.workspaceName}?`
+            : `Close pane ${confirmation?.paneId}?`
+        }
+        description={
+          confirmation?.type === "workspaceClose"
+            ? "This workspace still has a live pane. Closing it can interrupt work in that workspace."
+            : "This pane still has a live session. Close it only if you are sure you want to stop it."
+        }
+        confirmLabel={
+          confirmation?.type === "workspaceClose"
+            ? "Confirm close workspace"
+            : "Confirm close pane"
+        }
+        onCancel={() => setConfirmation(null)}
+        onConfirm={handleConfirm}
       />
     </main>
   );

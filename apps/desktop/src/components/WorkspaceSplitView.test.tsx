@@ -3,8 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LayoutNode, PaneState, WorkspaceState } from "@cmux-win/protocol";
 import { WorkspaceSplitView } from "./WorkspaceSplitView";
 
-type SessionKind = "runningShell" | "freshShell";
-
 vi.mock("./PaneTerminal", () => ({
   PaneTerminal: ({ pane }: { pane: PaneState }) => (
     <div data-testid={`mock-terminal-${pane.paneId}`} />
@@ -31,6 +29,7 @@ function makeWorkspace(overrides: Partial<WorkspaceState> = {}): WorkspaceState 
     layout: { type: "pane", paneId: "p1", sessionKind: "runningShell" },
     paneStates: { p1: makePane("p1") },
     ...overrides,
+    unreadNotificationCount: overrides.unreadNotificationCount ?? 0,
   };
 }
 
@@ -39,12 +38,16 @@ function makeProps(
     onFocusPane: (id: string) => void;
     onClosePane: (id: string) => void;
     onRestartPane: (id: string) => void;
+    paneErrors: Record<string, string>;
+    onDismissPaneError: (paneId: string) => void;
   }> = {}
 ) {
   return {
     onFocusPane: vi.fn(),
     onClosePane: vi.fn(),
     onRestartPane: vi.fn(),
+    paneErrors: {},
+    onDismissPaneError: vi.fn(),
     ...overrides,
   };
 }
@@ -84,6 +87,31 @@ describe("WorkspaceSplitView", () => {
       const pane = getByTestId("split-pane-p1");
       expect(pane.className).toContain("split-pane-notification");
     });
+
+    it("renders pane status detail when statusMessage is present", () => {
+      const workspace = makeWorkspace({
+        paneStates: {
+          p1: {
+            ...makePane("p1"),
+            ...({ statusMessage: "cwd missing" } as Record<string, unknown>),
+          } as PaneState,
+        },
+      });
+      const { getByText } = render(
+        <WorkspaceSplitView workspace={workspace} {...makeProps()} />
+      );
+
+      expect(getByText("cwd missing")).toBeTruthy();
+    });
+
+    it("renders a close button for the pane", () => {
+      const workspace = makeWorkspace();
+      const { getByRole } = render(
+        <WorkspaceSplitView workspace={workspace} {...makeProps()} />
+      );
+
+      expect(getByRole("button", { name: "Close p1" })).toBeTruthy();
+    });
   });
 
   describe("two panes (split)", () => {
@@ -108,6 +136,7 @@ describe("WorkspaceSplitView", () => {
           p2: makePane("p2"),
         },
         ...overrides,
+        unreadNotificationCount: overrides.unreadNotificationCount ?? 0,
       };
     }
 
@@ -153,7 +182,7 @@ describe("WorkspaceSplitView", () => {
 
       const splitNode = container.querySelector(".split-node-vertical");
       expect(splitNode).toBeTruthy();
-      expect(splitNode!.style.gridTemplateColumns).toBe("0.5fr 3px 0.5fr");
+      expect((splitNode as HTMLElement).style.gridTemplateColumns).toBe("0.5fr 3px 0.5fr");
     });
 
     it("dragging a handle updates gridTemplateColumns", () => {
@@ -207,6 +236,21 @@ describe("WorkspaceSplitView", () => {
       expect(onFocusPane).toHaveBeenCalledWith("p2");
     });
 
+    it("calls onClosePane when the pane close action is clicked", () => {
+      const onClosePane = vi.fn();
+      const workspace = makeTwoPaneWorkspace();
+      const { getByRole } = render(
+        <WorkspaceSplitView
+          workspace={workspace}
+          {...makeProps({ onClosePane })}
+        />
+      );
+
+      fireEvent.click(getByRole("button", { name: "Close p2" }));
+
+      expect(onClosePane).toHaveBeenCalledWith("p2");
+    });
+
     it("does not call onFocusPane when the focused pane is clicked", () => {
       const onFocusPane = vi.fn();
       const workspace = makeTwoPaneWorkspace();
@@ -252,7 +296,6 @@ describe("WorkspaceSplitView", () => {
 
     it("removes drag listeners when the view unmounts mid-drag", () => {
       const addEventListener = vi.spyOn(window, "addEventListener");
-      const removeEventListener = vi.spyOn(window, "removeEventListener");
       const workspace = makeTwoPaneWorkspace();
       const { container, getByTestId, unmount } = render(
         <WorkspaceSplitView workspace={workspace} {...makeProps()} />
@@ -378,6 +421,7 @@ describe("WorkspaceSplitView", () => {
           p3: makePane("p3"),
         },
         ...overrides,
+        unreadNotificationCount: overrides.unreadNotificationCount ?? 0,
       };
     }
 
@@ -444,6 +488,7 @@ describe("WorkspaceSplitView", () => {
           p1: makePane("p1"),
           p2: makePane("p2"),
         },
+        unreadNotificationCount: 0,
       };
     }
 
@@ -455,7 +500,7 @@ describe("WorkspaceSplitView", () => {
 
       const splitNode = container.querySelector(".split-node-horizontal");
       expect(splitNode).toBeTruthy();
-      expect(splitNode!.style.gridTemplateRows).toBe("0.5fr 3px 0.5fr");
+      expect((splitNode as HTMLElement).style.gridTemplateRows).toBe("0.5fr 3px 0.5fr");
     });
   });
 
@@ -479,6 +524,7 @@ describe("WorkspaceSplitView", () => {
           p1: makePane("p1"),
           p2: makePane("p2"),
         },
+        unreadNotificationCount: 0,
       };
 
       const props = makeProps();
@@ -514,6 +560,7 @@ describe("WorkspaceSplitView", () => {
           p1: makePane("p1"),
           p2: makePane("p2"),
         },
+        unreadNotificationCount: 0,
       };
       const singleWorkspace = makeWorkspace();
 
@@ -544,6 +591,7 @@ describe("WorkspaceSplitView", () => {
         focusedPaneId: "p1",
         layout: { type: "pane", paneId: "missing", sessionKind: "runningShell" },
         paneStates: {}, // No pane state for "missing"
+        unreadNotificationCount: 0,
       };
       const { container } = render(
         <WorkspaceSplitView workspace={workspace} {...makeProps()} />
@@ -574,6 +622,7 @@ describe("WorkspaceSplitView", () => {
           p1: makePane("p1"),
           // "missing" pane state not provided
         },
+        unreadNotificationCount: 0,
       };
       const { getByTestId, queryByTestId } = render(
         <WorkspaceSplitView workspace={workspace} {...makeProps()} />
@@ -581,6 +630,93 @@ describe("WorkspaceSplitView", () => {
 
       expect(getByTestId("split-pane-p1")).toBeTruthy();
       expect(queryByTestId("split-pane-missing")).toBeNull();
+    });
+  });
+
+  describe("pane error and status messages", () => {
+    it("renders pane error message inline near pane", () => {
+      const workspace = makeWorkspace();
+      const { getByTestId } = render(
+        <WorkspaceSplitView
+          workspace={workspace}
+          {...makeProps({ paneErrors: { p1: "Failed to close pane" } })}
+        />
+      );
+
+      const errorElement = getByTestId("pane-error-p1");
+      expect(errorElement).toBeTruthy();
+      expect(errorElement.textContent).toContain("Failed to close pane");
+    });
+
+    it("renders pane status message inline near pane", () => {
+      const workspace = makeWorkspace({
+        paneStates: {
+          p1: {
+            ...makePane("p1"),
+            ...({ statusMessage: "Restarting..." } as Record<string, unknown>),
+          } as PaneState,
+        },
+      });
+      const { getByTestId } = render(
+        <WorkspaceSplitView
+          workspace={workspace}
+          {...makeProps()}
+        />
+      );
+
+      const statusElement = getByTestId("pane-status-message-p1");
+      expect(statusElement).toBeTruthy();
+      expect(statusElement.textContent).toContain("Restarting...");
+    });
+
+    it("calls onDismissPaneError when dismiss button is clicked", () => {
+      const onDismissPaneError = vi.fn();
+      const workspace = makeWorkspace();
+      const { getByTestId } = render(
+        <WorkspaceSplitView
+          workspace={workspace}
+          {...makeProps({
+            paneErrors: { p1: "Failed to close pane" },
+            onDismissPaneError,
+          })}
+        />
+      );
+
+      const dismissButton = getByTestId("dismiss-pane-error-p1");
+      fireEvent.click(dismissButton);
+
+      expect(onDismissPaneError).toHaveBeenCalledWith("p1");
+    });
+
+    it("renders errors for specific panes only", () => {
+      const workspace = {
+        id: "ws-1",
+        name: "test",
+        rootDir: "/test",
+        shellProfile: "bash",
+        focusedPaneId: "p1",
+        layout: {
+          type: "split",
+          orientation: "vertical",
+          ratio: 0.5,
+          first: { type: "pane", paneId: "p1", sessionKind: "runningShell" },
+          second: { type: "pane", paneId: "p2", sessionKind: "freshShell" },
+        } as LayoutNode,
+        paneStates: {
+          p1: makePane("p1"),
+          p2: makePane("p2"),
+        },
+        unreadNotificationCount: 0,
+      };
+      const { getByTestId, queryByTestId } = render(
+        <WorkspaceSplitView
+          workspace={workspace}
+          {...makeProps({ paneErrors: { p1: "Error on p1" } })}
+        />
+      );
+
+      expect(getByTestId("pane-error-p1")).toBeTruthy();
+      expect(queryByTestId("pane-error-p2")).toBeNull();
     });
   });
 });
