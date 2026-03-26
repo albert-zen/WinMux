@@ -202,6 +202,39 @@ button {
   white-space: nowrap;
 }
 
+.workspace-rename-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.workspace-rename-input {
+  min-width: 180px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid #3b3b3b;
+  background: #161616;
+  color: #e5e5e5;
+}
+
+.workspace-rename-input:focus {
+  outline: none;
+  border-color: #5c88ff;
+  box-shadow: 0 0 0 1px rgba(92, 136, 255, 0.35);
+}
+
+.workspace-rename-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.workspace-rename-feedback {
+  margin-top: 4px;
+}
+
 .workspace-toolbar-actions {
   display: flex;
   align-items: center;

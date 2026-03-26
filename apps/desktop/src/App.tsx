@@ -20,6 +20,7 @@ import {
   setActiveWorkspace,
   workspaceClose,
   workspaceCreate,
+  workspaceRename,
 } from "./lib/desktopClient";
 import "./App.css";
 
@@ -59,6 +60,10 @@ function App() {
     workspaceClose: null,
   });
   const [createError, setCreateError] = useState<string | null>(null);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [isRenameMode, setIsRenameMode] = useState(false);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [isRenamingWorkspace, setIsRenamingWorkspace] = useState(false);
   const [paneErrors, setPaneErrors] = useState<Record<string, string>>({});
   const [confirmation, setConfirmation] = useState<ConfirmationState>(null);
   const [bannerDismissed, setBannerDismissed] = useState(false);
@@ -188,6 +193,14 @@ function App() {
     : {};
 
   useEffect(() => {
+    if (!workspace || !isRenameMode) {
+      return;
+    }
+
+    setRenameDraft(workspace.name);
+  }, [isRenameMode, workspace]);
+
+  useEffect(() => {
     if (workspace) {
       touchWorkspace(workspace.id);
     }
@@ -205,6 +218,23 @@ function App() {
   const clearWorkspaceError = (key: WorkspaceErrorKey) => {
     setWorkspaceErrors((prev) => ({ ...prev, [key]: null }));
   };
+
+  const handleRenameStart = useCallback(() => {
+    if (!workspace) {
+      return;
+    }
+
+    setRenameDraft(workspace.name);
+    setRenameError(null);
+    setIsRenameMode(true);
+  }, [workspace]);
+
+  const handleRenameCancel = useCallback(() => {
+    setIsRenameMode(false);
+    setRenameDraft(workspace?.name ?? "");
+    setRenameError(null);
+    setIsRenamingWorkspace(false);
+  }, [workspace]);
 
   const clearPaneError = (workspaceId: string, paneId: string) => {
     const key = getPaneErrorKey(workspaceId, paneId);
@@ -462,6 +492,38 @@ function App() {
     void navigator.clipboard.writeText(workspace.rootDir);
   }, [workspace]);
 
+  const handleRenameSubmit = useCallback(
+    async (event?: React.FormEvent<HTMLFormElement>) => {
+      event?.preventDefault();
+      if (!workspace) {
+        return;
+      }
+
+      const trimmedName = renameDraft.trim();
+      if (!trimmedName) {
+        setRenameError("Workspace name cannot be blank.");
+        return;
+      }
+
+      if (trimmedName === workspace.name) {
+        handleRenameCancel();
+        return;
+      }
+
+      setRenameError(null);
+      setIsRenamingWorkspace(true);
+      try {
+        await workspaceRename(workspace.id, trimmedName);
+        setIsRenameMode(false);
+      } catch (reason) {
+        setRenameError(reason instanceof Error ? reason.message : String(reason));
+      } finally {
+        setIsRenamingWorkspace(false);
+      }
+    },
+    [handleRenameCancel, renameDraft, workspace],
+  );
+
   const handleOpenQuickSwitcher = useCallback(() => {
     const activeElement =
       typeof document !== "undefined" && document.activeElement instanceof HTMLElement
@@ -578,11 +640,67 @@ function App() {
         {workspace ? (
           <header className="workspace-toolbar">
             <div className="workspace-toolbar-copy">
-              <strong>{workspace.name}</strong>
+              {isRenameMode ? (
+                <form className="workspace-rename-form" onSubmit={(event) => void handleRenameSubmit(event)}>
+                  <input
+                    aria-label="Rename workspace"
+                    className="workspace-rename-input"
+                    autoFocus
+                    value={renameDraft}
+                    onChange={(event) => {
+                      setRenameDraft(event.target.value);
+                      setRenameError(null);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        handleRenameCancel();
+                      }
+                    }}
+                  />
+                  <div className="workspace-rename-actions">
+                    <button
+                      type="submit"
+                      className="btn-secondary"
+                      disabled={isRenamingWorkspace}
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      disabled={isRenamingWorkspace}
+                      onClick={handleRenameCancel}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <strong>{workspace.name}</strong>
+              )}
               <span>{workspace.rootDir}</span>
+              {renameError ? (
+                <InlineFeedback
+                  className="workspace-rename-feedback"
+                  dismissLabel="Dismiss rename error"
+                  message={renameError}
+                  onDismiss={() => setRenameError(null)}
+                  role="status"
+                  tone="error"
+                />
+              ) : null}
             </div>
             <div className="workspace-toolbar-side">
               <div className="workspace-toolbar-actions">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  aria-label={`Rename workspace ${workspace.name}`}
+                  onClick={handleRenameStart}
+                >
+                  Rename workspace
+                </button>
                 <button type="button" onClick={() => handleSplit("horizontal")}>
                   Split horizontally
                 </button>

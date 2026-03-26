@@ -12,6 +12,7 @@ import {
   setActiveWorkspace,
   workspaceClose,
   workspaceCreate,
+  workspaceRename,
 } from "./lib/desktopClient";
 
 vi.mock("./hooks/useDesktopState", () => ({
@@ -26,6 +27,7 @@ vi.mock("./lib/desktopClient", () => ({
   setActiveWorkspace: vi.fn(),
   workspaceClose: vi.fn(),
   workspaceCreate: vi.fn(),
+  workspaceRename: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/plugin-opener", () => ({
@@ -200,6 +202,7 @@ describe("App", () => {
       sessionId: "session:new",
       paneId: "pane-new",
     });
+    vi.mocked(workspaceRename).mockResolvedValue(undefined);
     vi.mocked(openPath).mockResolvedValue(undefined);
     vi.mocked(useDesktopState).mockReturnValue(makeState());
     vi.stubGlobal("navigator", {
@@ -355,6 +358,34 @@ describe("App", () => {
       expect(openPath).toHaveBeenCalledWith("D:\\dev\\inbox");
     });
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("D:\\dev\\inbox");
+  });
+
+  it("renames the active workspace from the toolbar", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Rename workspace inbox" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Rename workspace" }), {
+      target: { value: "inbox-prime" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(workspaceRename).toHaveBeenCalledWith("ws-inbox", "inbox-prime");
+    });
+  });
+
+  it("keeps rename errors local to the workspace toolbar", async () => {
+    vi.mocked(workspaceRename).mockRejectedValueOnce(new Error("rename failed"));
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Rename workspace inbox" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Rename workspace" }), {
+      target: { value: "inbox-prime" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("rename failed")).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Rename workspace" })).toBeTruthy();
   });
 
   it("creates a workspace from the modal, closes the modal, and activates the new workspace", async () => {
