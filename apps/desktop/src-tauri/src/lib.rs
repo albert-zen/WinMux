@@ -39,6 +39,7 @@ struct RuntimeState<F> {
     themes: ThemeRegistry,
     state_path: Option<PathBuf>,
     active_workspace_id: Option<String>,
+    pane_errors: HashMap<(String, String), String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -48,6 +49,7 @@ struct PaneState {
     session_id: Option<String>,
     status: String,
     output: String,
+    status_message: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -97,6 +99,26 @@ impl<F> RuntimeState<F>
 where
     F: SessionHostFactory,
 {
+    fn fallback_active_workspace_id(&self) -> Option<String> {
+        self.registry.list().first().map(|workspace| workspace.id.clone())
+    }
+
+    fn sync_active_workspace_id(&mut self) {
+        if self
+            .active_workspace_id
+            .as_ref()
+            .is_some_and(|workspace_id| self.registry.list().iter().any(|ws| ws.id == *workspace_id))
+        {
+            return;
+        }
+        self.active_workspace_id = self.fallback_active_workspace_id();
+    }
+
+    fn clear_pane_error(&mut self, workspace_id: &str, pane_id: &str) {
+        self.pane_errors
+            .remove(&(workspace_id.to_string(), pane_id.to_string()));
+    }
+
     #[cfg(test)]
     fn new(registry: WorkspaceRegistry, factory: F) -> Self {
         let mut runtime = Self {
@@ -106,6 +128,7 @@ where
             themes: ThemeRegistry::with_builtins(),
             state_path: None,
             active_workspace_id: None,
+            pane_errors: HashMap::new(),
         };
         runtime.ensure_sessions_for_all_panes();
         runtime
@@ -123,12 +146,14 @@ where
             themes: ThemeRegistry::with_builtins(),
             state_path: Some(state_path),
             active_workspace_id: None,
+            pane_errors: HashMap::new(),
         };
         runtime.ensure_sessions_for_all_panes();
         runtime
     }
 
-    fn save_registry(&self) {
+    fn save_registry(&mut self) {
+        self.sync_active_workspace_id();
         if let Some(ref path) = self.state_path {
             if let Ok(json) = self.registry.to_persisted_json_with_active(
                 self.active_workspace_id.as_deref()
@@ -193,18 +218,26 @@ where
                 {
                     let spec = SessionSpec::new(format!("{workspace_id}:{pane_id}"), &shell_profile)
                         .with_working_dir(root_dir.clone());
-                    let _ = self.sessions.start(
+                    if let Err(error) = self.sessions.start(
                         &workspace_id,
                         &pane_id,
                         spec,
                         default_terminal_size(),
-                    );
+                    ) {
+                        self.pane_errors.insert(
+                            (workspace_id.clone(), pane_id.clone()),
+                            error.to_string(),
+                        );
+                    } else {
+                        self.clear_pane_error(&workspace_id, &pane_id);
+                    }
                 }
             }
         }
     }
 
     fn snapshot(&mut self) -> DesktopState {
+        self.sync_active_workspace_id();
         let session_snapshots = self.sessions.snapshot();
         let workspaces = self
             .registry
@@ -221,6 +254,11 @@ where
                                 && session.pane_id == pane.pane_id
                         });
 
+                    let pane_error = self
+                        .pane_errors
+                        .get(&(workspace.id.clone(), pane.pane_id.clone()))
+                        .cloned();
+
                     pane_states.insert(
                         pane.pane_id.clone(),
                         PaneState {
@@ -232,6 +270,9 @@ where
                             output: session_snapshot
                                 .map(|session| session.output.clone())
                                 .unwrap_or_default(),
+                            status_message: session_snapshot
+                                .and_then(|session| session.error_message.clone())
+                                .or(pane_error),
                         },
                     );
                 }
@@ -563,13 +604,18 @@ fn session_resize(
 fn set_active_workspace(
     workspace_id: String,
     state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
     let mut runtime = state.runtime.lock().unwrap();
     if !runtime.registry.list().iter().any(|ws| ws.id == workspace_id) {
         return Err("workspace not found".to_string());
     }
-    runtime.active_workspace_id = Some(workspace_id);
+    runtime.active_workspace_id = Some(workspace_id.clone());
     runtime.save_registry();
+    let _ = app_handle.emit(
+        DOMAIN_EVENT_NAME,
+        DomainEvent::workspace_activated(&workspace_id),
+    );
     Ok(())
 }
 
@@ -772,9 +818,10 @@ where
         "pane.focus" => handle_pane_focus(request, runtime),
         "pane.close" => handle_pane_close(request, runtime),
         "session.start" => handle_session_start(request, runtime),
+        "session.restart" => handle_session_restart(request, runtime),
         "app.getState" => handle_app_get_state(request, runtime),
         // Session commands delegate to the unified core-ipc dispatch_runtime
-        "session.sendInput" | "session.resize" | "session.restart" | "session.getStatus" => {
+        "session.sendInput" | "session.resize" | "session.getStatus" => {
             let mut ctx = RuntimeContext {
                 registry: &mut runtime.registry,
                 sessions: &mut runtime.sessions,
@@ -833,6 +880,7 @@ where
     let response = core_ipc::dispatch(request, &mut runtime.registry);
     if response.is_ok() {
         runtime.sessions.remove_pane(&workspace_id, &pane_id);
+        runtime.pane_errors.remove(&(workspace_id.clone(), pane_id.clone()));
         runtime.save_registry();
     }
     response
@@ -953,6 +1001,7 @@ where
         default_terminal_size(),
     ) {
         Ok(session_id) => {
+            runtime.clear_pane_error(&workspace_id, &pane_id);
             runtime.save_registry();
             ResponseEnvelope::success(
                 request.id(),
@@ -964,8 +1013,20 @@ where
             )
         }
         Err(error) => {
-            let _ = runtime.registry.remove_workspace(&workspace_id);
-            runtime_error_response(request.id(), error)
+            runtime.pane_errors.insert(
+                (workspace_id.clone(), pane_id.clone()),
+                error.to_string(),
+            );
+            runtime.save_registry();
+            ResponseEnvelope::success(
+                request.id(),
+                json!({
+                    "workspaceId": workspace_id,
+                    "paneId": pane_id,
+                    "sessionId": Option::<String>::None,
+                    "error": error.to_string(),
+                }),
+            )
         }
     }
 }
@@ -998,6 +1059,10 @@ where
     if response.is_ok() {
         for pane_id in &pane_ids {
             runtime.sessions.remove_pane(&workspace_id, pane_id);
+            runtime.clear_pane_error(&workspace_id, pane_id);
+        }
+        if runtime.active_workspace_id.as_deref() == Some(workspace_id.as_str()) {
+            runtime.active_workspace_id = runtime.fallback_active_workspace_id();
         }
         runtime.save_registry();
     }
@@ -1059,6 +1124,7 @@ where
         default_terminal_size(),
     ) {
         Ok(session_id) => {
+            runtime.clear_pane_error(&workspace_id, &pane_id);
             runtime.save_registry();
             ResponseEnvelope::success(
                 request.id(),
@@ -1070,8 +1136,20 @@ where
             )
         }
         Err(error) => {
-            rollback_split_panes(&mut runtime.registry, &workspace_id, &existing_pane_ids);
-            runtime_error_response(request.id(), error)
+            runtime.pane_errors.insert(
+                (workspace_id.clone(), pane_id.clone()),
+                error.to_string(),
+            );
+            runtime.save_registry();
+            ResponseEnvelope::success(
+                request.id(),
+                json!({
+                    "workspaceId": workspace_id,
+                    "newPaneId": pane_id,
+                    "sessionId": Option::<String>::None,
+                    "error": error.to_string(),
+                }),
+            )
         }
     }
 }
@@ -1120,16 +1198,60 @@ where
         spec,
         TerminalSize { rows, cols },
     ) {
-        Ok(session_id) => ResponseEnvelope::success(
-            request.id(),
-            json!({
-                "sessionId": session_id,
-                "workspaceId": workspace_id,
-                "paneId": pane_id,
-            }),
-        ),
-        Err(error) => runtime_error_response(request.id(), error),
+        Ok(session_id) => {
+            runtime.clear_pane_error(workspace_id, pane_id);
+            ResponseEnvelope::success(
+                request.id(),
+                json!({
+                    "sessionId": session_id,
+                    "workspaceId": workspace_id,
+                    "paneId": pane_id,
+                }),
+            )
+        }
+        Err(error) => {
+            runtime
+                .pane_errors
+                .insert((workspace_id.to_string(), pane_id.to_string()), error.to_string());
+            runtime_error_response(request.id(), error)
+        }
     }
+}
+
+fn handle_session_restart<F>(
+    request: &RequestEnvelope,
+    runtime: &mut RuntimeState<F>,
+) -> ResponseEnvelope
+where
+    F: SessionHostFactory,
+{
+    let session_id = request.payload()["sessionId"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    let pane_ref = runtime
+        .sessions
+        .get_status(&session_id)
+        .ok()
+        .map(|snapshot| (snapshot.workspace_id, snapshot.pane_id));
+
+    let mut ctx = RuntimeContext {
+        registry: &mut runtime.registry,
+        sessions: &mut runtime.sessions,
+    };
+    let response = core_ipc::dispatch_runtime(request, &mut ctx);
+
+    if let Some((workspace_id, pane_id)) = pane_ref {
+        if response.is_ok() {
+            runtime.clear_pane_error(&workspace_id, &pane_id);
+        } else if let Some(message) = response.error().map(|error| error.message.clone()) {
+            runtime
+                .pane_errors
+                .insert((workspace_id, pane_id), message);
+        }
+    }
+
+    response
 }
 
 fn handle_app_get_state<F>(
@@ -1281,11 +1403,24 @@ fn load_registry_from_state_path(path: &std::path::Path) -> (WorkspaceRegistry, 
     match std::fs::read_to_string(path) {
         Ok(json) => {
             match WorkspaceRegistry::from_persisted_json_with_active(&json) {
-                Ok(result) => (result.registry, result.active_workspace_id),
-                Err(_) => (core_state::starter_workspace_registry(), None),
+                Ok(result) => {
+                    let active_id = result.active_workspace_id.or_else(|| {
+                        result.registry.list().first().map(|ws| ws.id.clone())
+                    });
+                    (result.registry, active_id)
+                }
+                Err(_) => {
+                    let registry = core_state::starter_workspace_registry();
+                    let active_id = registry.list().first().map(|ws| ws.id.clone());
+                    (registry, active_id)
+                }
             }
         }
-        Err(_) => (core_state::starter_workspace_registry(), None),
+        Err(_) => {
+            let registry = core_state::starter_workspace_registry();
+            let active_id = registry.list().first().map(|ws| ws.id.clone());
+            (registry, active_id)
+        }
     }
 }
 
@@ -1353,10 +1488,12 @@ mod tests {
     #[derive(Default)]
     struct FakeFactoryState {
         spawn_commands: Vec<String>,
+        spawn_working_dirs: Vec<Option<String>>,
         writes: Vec<Vec<u8>>,
         outputs: Vec<Arc<Mutex<OutputBuffer>>>,
         exited: bool,
         fail_next_spawn: bool,
+        fail_working_dirs: HashMap<String, String>,
     }
 
     #[derive(Clone, Default)]
@@ -1402,9 +1539,18 @@ mod tests {
         ) -> Result<Box<dyn SessionHost>, String> {
             let output = Arc::new(Mutex::new(OutputBuffer::default()));
             let mut state = self.state.lock().unwrap();
+            state.spawn_working_dirs.push(spec.working_dir.clone());
             if state.fail_next_spawn {
                 state.fail_next_spawn = false;
                 return Err(format!("spawn failed for {}", spec.command));
+            }
+            if let Some(error) = spec
+                .working_dir
+                .as_ref()
+                .and_then(|dir| state.fail_working_dirs.get(dir))
+                .cloned()
+            {
+                return Err(error);
             }
             state.outputs.push(Arc::clone(&output));
             state.spawn_commands.push(spec.command.clone());
@@ -1435,12 +1581,49 @@ mod tests {
 
     #[test]
     fn runtime_state_new_auto_starts_session_for_starter_pane() {
-        let mut runtime = test_runtime();
+        let factory = FakeFactory::default();
+        let mut runtime = test_runtime_with_factory(factory.clone());
         let snapshot = runtime.snapshot();
 
         assert_eq!(runtime.sessions.session_id_for_pane("ws-inbox", "pane-1"), Some("session:1"));
         assert_eq!(snapshot.workspaces[0].pane_states["pane-1"].session_id, Some("session:1".into()));
         assert_eq!(snapshot.workspaces[0].pane_states["pane-1"].status, "running");
+        assert_eq!(
+            factory.state.lock().unwrap().spawn_working_dirs,
+            vec![Some("D:\\dev\\inbox".to_string())]
+        );
+    }
+
+    #[test]
+    fn runtime_state_new_surfaces_missing_working_directory_in_pane_status_message() {
+        let factory = FakeFactory::default();
+        let missing_root = "D:\\missing\\starter".to_string();
+        factory
+            .state
+            .lock()
+            .unwrap()
+            .fail_working_dirs
+            .insert(missing_root.clone(), format!("working directory not found: {missing_root}"));
+        let mut registry = WorkspaceRegistry::new();
+        registry
+            .create(
+                "ws-missing",
+                "Missing",
+                missing_root,
+                "cmd.exe",
+                core_layout::WorkspaceLayout::starter(),
+            )
+            .unwrap();
+
+        let mut runtime = RuntimeState::new(registry, factory);
+        let snapshot = runtime.snapshot();
+
+        assert_eq!(snapshot.workspaces[0].pane_states["pane-1"].status, "none");
+        assert_eq!(
+            snapshot.workspaces[0].pane_states["pane-1"].status_message.as_deref(),
+            Some("working directory not found: D:\\missing\\starter")
+        );
+        assert_eq!(snapshot.workspaces[0].pane_states["pane-1"].session_id, None);
     }
 
     #[test]
@@ -1649,7 +1832,8 @@ mod tests {
 
     #[test]
     fn handle_runtime_request_workspace_create_auto_starts_initial_session() {
-        let mut runtime = test_runtime();
+        let factory = FakeFactory::default();
+        let mut runtime = test_runtime_with_factory(factory.clone());
 
         let raw = handle_runtime_request(
             r#"{
@@ -1680,13 +1864,25 @@ mod tests {
             .find(|workspace| workspace.id == workspace_id)
             .unwrap();
         assert_eq!(workspace.shell_profile, "pwsh");
+        assert_eq!(
+            factory.state.lock().unwrap().spawn_working_dirs.last().cloned(),
+            Some(Some("D:\\dev\\api".to_string()))
+        );
     }
 
     #[test]
-    fn handle_runtime_request_workspace_create_rolls_back_registry_when_session_start_fails() {
+    fn handle_runtime_request_workspace_create_surfaces_working_directory_failures_in_pane_status_message() {
         let factory = FakeFactory::default();
         let mut runtime = test_runtime_with_factory(factory.clone());
-        factory.state.lock().unwrap().fail_next_spawn = true;
+        factory
+            .state
+            .lock()
+            .unwrap()
+            .fail_working_dirs
+            .insert(
+                "D:\\missing\\api".to_string(),
+                "working directory not found: D:\\missing\\api".to_string(),
+            );
 
         let raw = handle_runtime_request(
             r#"{
@@ -1696,7 +1892,7 @@ mod tests {
                 "command": "workspace.create",
                 "payload": {
                     "name": "api",
-                    "rootDir": "D:\\dev\\api",
+                    "rootDir": "D:\\missing\\api",
                     "shellProfile": "pwsh"
                 }
             }"#,
@@ -1704,14 +1900,29 @@ mod tests {
         );
 
         let response: ResponseEnvelope = serde_json::from_str(&raw).unwrap();
-        assert!(!response.is_ok());
-        assert_eq!(runtime.registry.list().len(), 1);
-        assert_eq!(runtime.registry.list()[0].id, "ws-inbox");
+        assert!(response.is_ok());
+        let result = response.result().unwrap();
+        let workspace_id = result["workspaceId"].as_str().unwrap();
+        let pane_id = result["paneId"].as_str().unwrap();
+        assert!(result["sessionId"].is_null());
+
+        let snapshot = runtime.snapshot();
+        let workspace = snapshot
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.id == workspace_id)
+            .unwrap();
+        assert_eq!(
+            workspace.pane_states[pane_id].status_message.as_deref(),
+            Some("working directory not found: D:\\missing\\api")
+        );
+        assert_eq!(workspace.pane_states[pane_id].status, "none");
     }
 
     #[test]
-    fn handle_runtime_request_pane_split_auto_starts_session_with_workspace_shell_profile() {
-        let mut runtime = test_runtime();
+    fn handle_runtime_request_pane_split_auto_starts_session_with_workspace_root_dir() {
+        let factory = FakeFactory::default();
+        let mut runtime = test_runtime_with_factory(factory.clone());
 
         let raw = handle_runtime_request(
             r#"{
@@ -1743,13 +1954,25 @@ mod tests {
                 .count(),
             2
         );
+        assert_eq!(
+            factory.state.lock().unwrap().spawn_working_dirs.last().cloned(),
+            Some(Some("D:\\dev\\inbox".to_string()))
+        );
     }
 
     #[test]
-    fn handle_runtime_request_pane_split_rolls_back_layout_when_session_start_fails() {
+    fn handle_runtime_request_pane_split_surfaces_working_directory_failures_in_pane_status_message() {
         let factory = FakeFactory::default();
         let mut runtime = test_runtime_with_factory(factory.clone());
-        factory.state.lock().unwrap().fail_next_spawn = true;
+        factory
+            .state
+            .lock()
+            .unwrap()
+            .fail_working_dirs
+            .insert(
+                "D:\\dev\\inbox".to_string(),
+                "working directory not found: D:\\dev\\inbox".to_string(),
+            );
 
         let raw = handle_runtime_request(
             r#"{
@@ -1769,17 +1992,23 @@ mod tests {
         );
 
         let response: ResponseEnvelope = serde_json::from_str(&raw).unwrap();
-        assert!(!response.is_ok());
+        assert!(response.is_ok());
+        assert!(response.result().unwrap()["sessionId"].is_null());
 
         let snapshot = runtime.snapshot();
-        assert_eq!(snapshot.workspaces[0].pane_states.len(), 1);
-        assert_eq!(snapshot.workspaces[0].pane_states["pane-1"].pane_id, "pane-1");
+        assert_eq!(snapshot.workspaces[0].pane_states.len(), 2);
+        assert_eq!(
+            snapshot.workspaces[0].pane_states["pane-2"].status_message.as_deref(),
+            Some("working directory not found: D:\\dev\\inbox")
+        );
+        assert_eq!(snapshot.workspaces[0].pane_states["pane-2"].status, "none");
         assert_eq!(runtime.sessions.session_id_for_pane("ws-inbox", "pane-2"), None);
     }
 
     #[test]
     fn handle_runtime_request_session_restart_returns_new_session_id_for_exited_session() {
-        let mut runtime = test_runtime();
+        let factory = FakeFactory::default();
+        let mut runtime = test_runtime_with_factory(factory.clone());
         let session_id = runtime
             .sessions
             .session_id_for_pane("ws-inbox", "pane-1")
@@ -1839,6 +2068,94 @@ mod tests {
         assert!(restart_response.is_ok());
         assert_eq!(restart_response.result().unwrap()["sessionId"], "session:2");
         assert_eq!(restart_response.result().unwrap()["paneId"], "pane-1");
+        assert_eq!(
+            factory.state.lock().unwrap().spawn_working_dirs,
+            vec![
+                Some("D:\\dev\\inbox".to_string()),
+                Some("D:\\dev\\inbox".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn handle_runtime_request_session_restart_surfaces_working_directory_failures_in_pane_status_message() {
+        let factory = FakeFactory::default();
+        let mut runtime = test_runtime_with_factory(factory.clone());
+        let session_id = runtime
+            .sessions
+            .session_id_for_pane("ws-inbox", "pane-1")
+            .unwrap()
+            .to_string();
+
+        let send = handle_runtime_request(
+            &format!(
+                r#"{{
+                    "protocolVersion": 1,
+                    "id": "req-send",
+                    "type": "command",
+                    "command": "session.sendInput",
+                    "payload": {{
+                        "sessionId": "{session_id}",
+                        "data": "exit\r\n"
+                    }}
+                }}"#
+            ),
+            &mut runtime,
+        );
+        let send_response: ResponseEnvelope = serde_json::from_str(&send).unwrap();
+        assert!(send_response.is_ok());
+
+        let status = handle_runtime_request(
+            &format!(
+                r#"{{
+                    "protocolVersion": 1,
+                    "id": "req-status",
+                    "type": "command",
+                    "command": "session.getStatus",
+                    "payload": {{
+                        "sessionId": "{session_id}"
+                    }}
+                }}"#
+            ),
+            &mut runtime,
+        );
+        let status_response: ResponseEnvelope = serde_json::from_str(&status).unwrap();
+        assert_eq!(status_response.result().unwrap()["status"], "exited");
+
+        factory
+            .state
+            .lock()
+            .unwrap()
+            .fail_working_dirs
+            .insert(
+                "D:\\dev\\inbox".to_string(),
+                "working directory not found: D:\\dev\\inbox".to_string(),
+            );
+
+        let restarted = handle_runtime_request(
+            &format!(
+                r#"{{
+                    "protocolVersion": 1,
+                    "id": "req-restart-fail",
+                    "type": "command",
+                    "command": "session.restart",
+                    "payload": {{
+                        "sessionId": "{session_id}"
+                    }}
+                }}"#
+            ),
+            &mut runtime,
+        );
+        let restart_response: ResponseEnvelope = serde_json::from_str(&restarted).unwrap();
+        assert!(!restart_response.is_ok());
+
+        let snapshot = runtime.snapshot();
+        assert_eq!(
+            snapshot.workspaces[0].pane_states["pane-1"].status_message.as_deref(),
+            Some("working directory not found: D:\\dev\\inbox")
+        );
+        assert_eq!(snapshot.workspaces[0].pane_states["pane-1"].status, "none");
+        assert_eq!(snapshot.workspaces[0].pane_states["pane-1"].session_id, None);
     }
 
     #[test]
@@ -2540,13 +2857,21 @@ mod tests {
         assert!(state_path.exists());
 
         let (restored_registry, _active_id) = load_registry_from_state_path(&state_path);
-        let mut restored_runtime = RuntimeState::new(restored_registry, FakeFactory::default());
+        let restored_factory = FakeFactory::default();
+        let mut restored_runtime = RuntimeState::new(restored_registry, restored_factory.clone());
         let snapshot = restored_runtime.snapshot();
 
         assert_eq!(snapshot.workspaces.len(), 1);
         assert_eq!(snapshot.workspaces[0].name, "Inbox Prime");
         assert_eq!(snapshot.workspaces[0].pane_states.len(), 2);
         assert!(snapshot.workspaces[0].pane_states.values().all(|pane| pane.session_id.is_some()));
+        assert_eq!(
+            restored_factory.state.lock().unwrap().spawn_working_dirs,
+            vec![
+                Some("D:\\dev\\inbox".to_string()),
+                Some("D:\\dev\\inbox".to_string()),
+            ]
+        );
 
         let _ = fs::remove_file(state_path);
     }
@@ -2561,7 +2886,7 @@ mod tests {
 
         assert_eq!(restored_registry.list().len(), 1);
         assert_eq!(restored_registry.list()[0].id, "ws-inbox");
-        assert_eq!(active_id, None);
+        assert_eq!(active_id, Some("ws-inbox".to_string()));
 
         let _ = fs::remove_file(state_path);
     }
@@ -2613,6 +2938,33 @@ mod tests {
     }
 
     #[test]
+    fn load_registry_from_state_path_falls_back_to_first_workspace_when_active_workspace_is_invalid() {
+        let state_path = unique_state_path("active-ws-fallback");
+        let mut registry = core_state::starter_workspace_registry();
+        registry
+            .create(
+                "ws-api",
+                "api",
+                "D:\\dev\\api",
+                "pwsh",
+                core_layout::WorkspaceLayout::starter(),
+            )
+            .unwrap();
+        let json = registry
+            .to_persisted_json_with_active(Some("ws-missing"))
+            .unwrap();
+        fs::create_dir_all(state_path.parent().unwrap()).unwrap();
+        fs::write(&state_path, &json).unwrap();
+
+        let (restored_registry, active_id) = load_registry_from_state_path(&state_path);
+
+        assert_eq!(restored_registry.list().len(), 2);
+        assert_eq!(active_id, Some("ws-inbox".to_string()));
+
+        let _ = fs::remove_file(state_path);
+    }
+
+    #[test]
     fn set_active_workspace_stores_id_in_runtime() {
         let mut runtime = test_runtime();
         assert_eq!(runtime.active_workspace_id, None);
@@ -2637,6 +2989,61 @@ mod tests {
         assert_eq!(snapshot.active_workspace_id, Some("ws-inbox".to_string()));
         let json = serde_json::to_value(&snapshot).unwrap();
         assert_eq!(json["activeWorkspaceId"], "ws-inbox");
+    }
+
+    #[test]
+    fn handle_runtime_request_workspace_close_reassigns_active_workspace_and_persists_it() {
+        let state_path = unique_state_path("close-active");
+        let mut runtime = RuntimeState::new_with_state_path(
+            core_state::starter_workspace_registry(),
+            FakeFactory::default(),
+            state_path.clone(),
+        );
+        let create = handle_runtime_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req-create",
+                "type": "command",
+                "command": "workspace.create",
+                "payload": {
+                    "name": "api",
+                    "rootDir": "D:\\dev\\api",
+                    "shellProfile": "pwsh"
+                }
+            }"#,
+            &mut runtime,
+        );
+        let create_response: ResponseEnvelope = serde_json::from_str(&create).unwrap();
+        assert!(create_response.is_ok());
+        let workspace_id = create_response.result().unwrap()["workspaceId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        runtime.active_workspace_id = Some(workspace_id.clone());
+        runtime.save_registry();
+
+        let close = handle_runtime_request(
+            &format!(
+                r#"{{
+                    "protocolVersion": 1,
+                    "id": "req-close-active",
+                    "type": "command",
+                    "command": "workspace.close",
+                    "payload": {{
+                        "workspaceId": "{workspace_id}"
+                    }}
+                }}"#
+            ),
+            &mut runtime,
+        );
+        let close_response: ResponseEnvelope = serde_json::from_str(&close).unwrap();
+        assert!(close_response.is_ok());
+        assert_eq!(runtime.active_workspace_id, Some("ws-inbox".to_string()));
+
+        let (_restored_registry, restored_active_id) = load_registry_from_state_path(&state_path);
+        assert_eq!(restored_active_id, Some("ws-inbox".to_string()));
+
+        let _ = fs::remove_file(state_path);
     }
 
     #[test]

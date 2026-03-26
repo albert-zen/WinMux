@@ -63,6 +63,7 @@ export type PaneState = {
   sessionId: string | null;
   status: PaneStatus;
   output: string;
+  statusMessage: string | null;
 };
 
 export type WorkspaceState = {
@@ -161,6 +162,7 @@ export type DomainEvent =
   | { type: "workspaceCreated"; workspaceId: string }
   | { type: "workspaceRenamed"; workspaceId: string; name: string }
   | { type: "workspaceClosed"; workspaceId: string }
+  | { type: "workspaceActivated"; workspaceId: string }
   | { type: "paneSplit"; workspaceId: string; paneId: string; newPaneId: string }
   | { type: "paneClosed"; workspaceId: string; paneId: string }
   | { type: "paneFocused"; workspaceId: string; paneId: string }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   APP_NAME,
   type DesktopState,
+  type DomainEvent,
   METADATA_REFRESH_POLICY,
   type PaneState,
   PROTOCOL_VERSION,
@@ -72,10 +73,20 @@ describe("protocol constants", () => {
       paneId: "pane-1",
       sessionId: "session:1",
       status: "running",
-      output: "hello"
+      output: "hello",
+      statusMessage: null
     };
     const state: DesktopState = {
       protocolVersion: PROTOCOL_VERSION,
+      activeWorkspaceId: "ws-inbox",
+      activeTheme: {
+        id: "dark",
+        name: "Dark",
+        foreground: "#fff",
+        background: "#000",
+        cursor: "#fff",
+        selection: "#333"
+      },
       workspaces: [
         {
           id: "ws-inbox",
@@ -83,12 +94,25 @@ describe("protocol constants", () => {
           rootDir: "D:\\dev\\inbox",
           shellProfile: "cmd.exe",
           focusedPaneId: "pane-1",
-          panes: [pane]
+          layout: { type: "pane", paneId: "pane-1", sessionKind: "runningShell" },
+          paneStates: { "pane-1": pane },
+          unreadNotificationCount: 0
         }
       ]
     };
 
+    expect(state.activeWorkspaceId).toBe("ws-inbox");
     expect(state.workspaces[0].shellProfile).toBe("cmd.exe");
-    expect(state.workspaces[0].panes[0].status).toBe("running");
+    expect(state.workspaces[0].paneStates["pane-1"].status).toBe("running");
+    expect(state.workspaces[0].paneStates["pane-1"].statusMessage).toBeNull();
+  });
+
+  it("describes workspace activation domain events", () => {
+    const event: DomainEvent = {
+      type: "workspaceActivated",
+      workspaceId: "ws-inbox"
+    };
+
+    expect(event.workspaceId).toBe("ws-inbox");
   });
 });

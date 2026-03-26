@@ -55,6 +55,10 @@ pub enum DomainEvent {
     NotificationCreated {
         notification_id: String,
     },
+    #[serde(rename_all = "camelCase")]
+    WorkspaceActivated {
+        workspace_id: String,
+    },
 }
 
 /// Convenience constructors for DomainEvent variants.
@@ -134,6 +138,13 @@ impl DomainEvent {
     pub fn notification_created(notification_id: impl Into<String>) -> Self {
         Self::NotificationCreated {
             notification_id: notification_id.into(),
+        }
+    }
+
+    #[must_use]
+    pub fn workspace_activated(workspace_id: impl Into<String>) -> Self {
+        Self::WorkspaceActivated {
+            workspace_id: workspace_id.into(),
         }
     }
 }
@@ -225,6 +236,15 @@ mod tests {
     }
 
     #[test]
+    fn workspace_activated_serde_roundtrip() {
+        let event = DomainEvent::workspace_activated("ws-1");
+        let json = serde_json::to_string(&event).unwrap();
+        let restored: DomainEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, event);
+        assert!(json.contains("\"type\":\"workspaceActivated\""));
+    }
+
+    #[test]
     fn all_variants_use_camel_case_type_tag() {
         let events = vec![
             DomainEvent::workspace_created("ws-1"),
@@ -236,6 +256,7 @@ mod tests {
             DomainEvent::session_started("s-1", "ws-1", "p-1"),
             DomainEvent::session_exited("s-1"),
             DomainEvent::notification_created("n-1"),
+            DomainEvent::workspace_activated("ws-1"),
         ];
 
         let expected_types = vec![
@@ -248,6 +269,7 @@ mod tests {
             "sessionStarted",
             "sessionExited",
             "notificationCreated",
+            "workspaceActivated",
         ];
 
         for (event, expected_type) in events.iter().zip(expected_types.iter()) {

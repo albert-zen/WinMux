@@ -123,6 +123,7 @@ pub struct SessionRecord {
     pub id: SessionId,
     pub spec: SessionSpec,
     pub status: SessionStatus,
+    pub error_message: Option<String>,
 }
 
 impl SessionRecord {
@@ -132,6 +133,7 @@ impl SessionRecord {
             id,
             spec,
             status: SessionStatus::Created,
+            error_message: None,
         }
     }
 
@@ -210,6 +212,7 @@ pub struct SessionSnapshot {
     pub status: String,
     pub exit_code: Option<i32>,
     pub output: String,
+    pub error_message: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -461,6 +464,7 @@ where
             status,
             exit_code,
             output: String::from_utf8_lossy(capped).into_owned(),
+            error_message: session.record.error_message.clone(),
         })
     }
 
