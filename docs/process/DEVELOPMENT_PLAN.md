@@ -42,6 +42,7 @@ What this means in practice:
 - the backend path is real
 - the app is now a working multi-pane terminal demo
 - the remaining gaps are authoritative layout persistence, richer restore semantics, and hardening
+- the next quality gains are increasingly about interaction polish, not just missing primitives
 
 ## Definition Of "Usable"
 
@@ -59,6 +60,138 @@ This does not yet require:
 - theme import breadth
 - updater and packaging polish
 - advanced sidebar metadata
+
+## Interaction Quality Track
+
+The next phase should explicitly optimize for "daily feel", not just capability checklists.
+
+The current app already supports the core actions, but several high-frequency workflows still feel
+rough because they require extra clicks, weak visual guidance, or too much memory from the user.
+
+The most valuable interaction work is:
+
+1. Make workspace switching feel instant and reliable.
+2. Make new workspaces fast to create without hand-editing every field.
+3. Make terminal startup semantics obvious and trustworthy.
+4. Surface failures close to the pane or workspace that caused them.
+
+This track should be implemented before deeper visual polish and in parallel with restore/hardening
+where the file ownership is clean.
+
+### Interaction Slice A: Workspace Selection Ergonomics
+
+Problem:
+
+- workspace switching currently works, but it still behaves like a static list more than a fluid
+  "context switch" tool
+- switching does not yet feel optimized for repeated back-and-forth use during development
+
+Scope:
+
+- persist and restore the active workspace explicitly
+- add MRU-style switching so a user can jump between the two or three most recent workspaces
+- restore terminal focus automatically after a workspace switch
+- make the workspace path and shell profile more visible in the active workspace chrome
+- expose fast actions such as "open root directory" and "copy path"
+
+Exit criteria:
+
+- the app reopens into the last active workspace when persisted state is valid
+- switching workspaces returns keyboard focus to the active terminal surface without an extra click
+- repeated switching between recent workspaces is faster than clicking individual sidebar tabs
+- the current workspace path is visible enough that the user does not need to remember it
+
+Required tests:
+
+- active workspace id survives persistence and startup restore
+- selecting another workspace updates the runtime and returns terminal focus to the focused pane
+- MRU order updates correctly after repeated workspace switches
+- root-directory quick actions call the expected desktop command or helper
+
+### Interaction Slice B: Workspace Creation Flow
+
+Problem:
+
+- creating a workspace still feels too much like filling a raw form
+- users should not need to manually type a project name if the directory already implies one
+
+Scope:
+
+- add directory-picker support in the desktop shell
+- derive the default workspace name from the selected folder name
+- offer shell-profile presets such as `cmd.exe`, `pwsh`, and `bash`
+- validate the selected directory before submitting
+- keep the modal optimized for keyboard submission and immediate focus return
+
+Exit criteria:
+
+- a user can create a workspace by picking a folder and pressing Enter
+- the default name is sensible without extra typing
+- invalid paths are rejected before the request is sent
+- successful creation leaves the user inside the new workspace with a focused terminal
+
+Required tests:
+
+- selecting a directory updates the suggested workspace name
+- invalid or missing directory input blocks submission with inline feedback
+- create success switches into the new workspace and focuses the starter pane terminal
+- shell-profile preset selection maps to the correct create payload
+
+### Interaction Slice C: Terminal Start And CWD Semantics
+
+Problem:
+
+- users need to trust that "workspace root" really means the shell starts there
+- once pane interactions get richer, users will also expect predictable behavior from split panes
+
+Scope:
+
+- lock in tests that every auto-started session begins in the workspace root directory
+- make the current root directory visible in the workspace chrome and status bar
+- define the next-step policy for new panes:
+  - short term: always start at workspace root
+  - later: optionally inherit cwd from the focused pane when the runtime can do so reliably
+- add explicit error surfacing when a workspace directory is invalid or no longer exists
+
+Exit criteria:
+
+- starter, created, restored, restarted, and split panes all have predictable cwd behavior
+- cwd mismatches are treated as bugs and covered by tests
+- users can always tell which workspace directory they are operating in
+
+Required tests:
+
+- auto-started starter workspace sessions honor `workspace.rootDir`
+- `workspace.create` and `pane.split` sessions honor the selected workspace directory
+- restore preserves workspace root directories for relaunched sessions
+- invalid working-directory failures surface a workspace or pane-level error
+
+### Interaction Slice D: Safety And Feedback
+
+Problem:
+
+- users need clearer guidance when destructive actions or runtime failures happen
+- errors are still too easy to miss or too detached from the thing that failed
+
+Scope:
+
+- confirm workspace close when live sessions are still running
+- confirm pane close when the pane has a running session and there is a risk of accidental loss
+- show inline pane-level status detail for startup failure, runtime failure, and exited state
+- upgrade global error banners into more actionable, local feedback where possible
+
+Exit criteria:
+
+- destructive actions are harder to trigger accidentally
+- a pane that fails to start or exits unexpectedly explains itself in-context
+- workspace-level failures do not require reading console logs to understand what happened
+
+Required tests:
+
+- closing a workspace with running sessions requires confirmation
+- pane-level runtime failures render local feedback without breaking the rest of the workspace
+- dismissing one local error does not hide unrelated failures elsewhere
+- destructive confirmations do not appear for already exited or empty panes
 
 ## Immediate Priorities
 
@@ -241,6 +374,12 @@ Rule:
 - parallel coding is allowed only when file ownership is explicit
 - do not let multiple subagents edit the same file set concurrently
 
+Interaction-specific stream ownership should follow the same rule:
+
+- sidebar / switcher work owns desktop React components and shortcut hooks
+- cwd / restore work owns desktop runtime plus state persistence
+- feedback work owns protocol status shape, runtime errors, and desktop presentation
+
 ## TDD Expectations
 
 Each non-trivial slice should follow this order:
@@ -272,6 +411,9 @@ Required verification before merge:
 Continue the restore/hardening pass next:
 
 - persist and restore one clear workspace-level selection signal
+- make workspace switching return focus to the active terminal
+- lock in tests that starter, split, and restored sessions launch in the workspace root
+- add a first round of local pane/workspace failure surfaces
 - harden pane id generation against restored layouts and custom pane ids
 - add explicit PTY/runtime error surfaces in the desktop shell
 - then lock in tests for focus persistence and degraded restore behavior
