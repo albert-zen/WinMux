@@ -9,7 +9,7 @@ pub fn crate_name() -> &'static str {
 
 /// Domain events emitted by mutations in the cmux-win system.
 /// These are designed for IPC broadcast and can be serialized to JSON.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum DomainEvent {
     #[serde(rename_all = "camelCase")]
@@ -40,6 +40,12 @@ pub enum DomainEvent {
     PaneFocused {
         workspace_id: String,
         pane_id: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    SplitRatioChanged {
+        workspace_id: String,
+        split_id: String,
+        ratio: f64,
     },
     #[serde(rename_all = "camelCase")]
     SessionStarted {
@@ -111,6 +117,19 @@ impl DomainEvent {
         Self::PaneFocused {
             workspace_id: workspace_id.into(),
             pane_id: pane_id.into(),
+        }
+    }
+
+    #[must_use]
+    pub fn split_ratio_changed(
+        workspace_id: impl Into<String>,
+        split_id: impl Into<String>,
+        ratio: f64,
+    ) -> Self {
+        Self::SplitRatioChanged {
+            workspace_id: workspace_id.into(),
+            split_id: split_id.into(),
+            ratio,
         }
     }
 
@@ -253,6 +272,7 @@ mod tests {
             DomainEvent::pane_split("ws-1", "p-1", "p-2"),
             DomainEvent::pane_closed("ws-1", "p-1"),
             DomainEvent::pane_focused("ws-1", "p-1"),
+            DomainEvent::split_ratio_changed("ws-1", "p-1", 0.6),
             DomainEvent::session_started("s-1", "ws-1", "p-1"),
             DomainEvent::session_exited("s-1"),
             DomainEvent::notification_created("n-1"),
@@ -266,6 +286,7 @@ mod tests {
             "paneSplit",
             "paneClosed",
             "paneFocused",
+            "splitRatioChanged",
             "sessionStarted",
             "sessionExited",
             "notificationCreated",

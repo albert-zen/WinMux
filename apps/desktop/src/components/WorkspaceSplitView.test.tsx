@@ -39,6 +39,8 @@ function makeProps(
     onFocusPane: (id: string) => void;
     onClosePane: (id: string) => void;
     onRestartPane: (id: string) => void;
+    onResizeSplit: (splitId: string, ratio: number) => void;
+    splitErrorToken: number;
     paneErrors: Record<string, string>;
     onDismissPaneError: (paneId: string) => void;
   }> = {}
@@ -47,6 +49,8 @@ function makeProps(
     onFocusPane: vi.fn(),
     onClosePane: vi.fn(),
     onRestartPane: vi.fn(),
+    onResizeSplit: vi.fn(),
+    splitErrorToken: 0,
     paneErrors: {},
     onDismissPaneError: vi.fn(),
     ...overrides,
@@ -222,6 +226,42 @@ describe("WorkspaceSplitView", () => {
       expect(parseFloat(firstFr)).toBeGreaterThan(0.5);
     });
 
+    it("commits the adjusted ratio through the resize callback on mouse up", () => {
+      const onResizeSplit = vi.fn();
+      const workspace = makeTwoPaneWorkspace();
+      const { container, getByTestId } = render(
+        <WorkspaceSplitView
+          workspace={workspace}
+          {...makeProps({ onResizeSplit })}
+        />
+      );
+
+      const splitNode = container.querySelector(
+        ".split-node-vertical"
+      ) as HTMLElement;
+      vi.spyOn(splitNode, "getBoundingClientRect").mockReturnValue({
+        width: 1000,
+        height: 600,
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 1000,
+        bottom: 600,
+        toJSON: () => ({}),
+      });
+
+      act(() => {
+        fireEvent.mouseDown(getByTestId("split-handle-p1"), { clientX: 500 });
+        fireEvent.mouseMove(window, { clientX: 650 });
+        fireEvent.mouseUp(window);
+      });
+
+      expect(onResizeSplit).toHaveBeenCalledTimes(1);
+      expect(onResizeSplit).toHaveBeenCalledWith("p1", expect.any(Number));
+      expect(onResizeSplit.mock.calls[0][1]).toBeGreaterThan(0.5);
+    });
+
     it("calls onFocusPane when a non-focused pane is clicked", () => {
       const onFocusPane = vi.fn();
       const workspace = makeTwoPaneWorkspace();
@@ -297,9 +337,13 @@ describe("WorkspaceSplitView", () => {
 
     it("removes drag listeners when the view unmounts mid-drag", () => {
       const addEventListener = vi.spyOn(window, "addEventListener");
+      const onResizeSplit = vi.fn();
       const workspace = makeTwoPaneWorkspace();
       const { container, getByTestId, unmount } = render(
-        <WorkspaceSplitView workspace={workspace} {...makeProps()} />
+        <WorkspaceSplitView
+          workspace={workspace}
+          {...makeProps({ onResizeSplit })}
+        />
       );
 
       const splitNode = container.querySelector(
@@ -343,6 +387,7 @@ describe("WorkspaceSplitView", () => {
       // The listeners are cleaned up via mouseUp, but we verify the unmount doesn't crash
       expect(mouseMoveHandler).toBeInstanceOf(Function);
       expect(mouseUpHandler).toBeInstanceOf(Function);
+      expect(onResizeSplit).not.toHaveBeenCalled();
     });
 
     it("preserves adjusted ratios when pane IDs are unchanged on rerender", () => {
@@ -390,6 +435,90 @@ describe("WorkspaceSplitView", () => {
       );
 
       expect(splitNode.style.gridTemplateColumns).toBe(templateAfterDrag);
+    });
+
+    it("drops the optimistic ratio once a new layout ratio arrives from state", () => {
+      const workspace = makeTwoPaneWorkspace();
+      const props = makeProps();
+      const { container, getByTestId, rerender } = render(
+        <WorkspaceSplitView workspace={workspace} {...props} />
+      );
+
+      const splitNode = container.querySelector(
+        ".split-node-vertical"
+      ) as HTMLElement;
+      vi.spyOn(splitNode, "getBoundingClientRect").mockReturnValue({
+        width: 1000,
+        height: 600,
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 1000,
+        bottom: 600,
+        toJSON: () => ({}),
+      });
+
+      act(() => {
+        fireEvent.mouseDown(getByTestId("split-handle-p1"), { clientX: 500 });
+        fireEvent.mouseMove(window, { clientX: 650 });
+        fireEvent.mouseUp(window);
+      });
+
+      rerender(
+        <WorkspaceSplitView
+          workspace={makeTwoPaneWorkspace({
+            layout: {
+              type: "split",
+              orientation: "vertical",
+              ratio: 0.4,
+              first: { type: "pane", paneId: "p1", sessionKind: "runningShell" },
+              second: { type: "pane", paneId: "p2", sessionKind: "runningShell" },
+            },
+          })}
+          {...props}
+        />
+      );
+
+      expect(splitNode.style.gridTemplateColumns).toBe("0.4fr 3px 0.6fr");
+    });
+
+    it("clears the optimistic ratio when the resize command reports an error", () => {
+      const workspace = makeTwoPaneWorkspace();
+      const props = makeProps();
+      const { container, getByTestId, rerender } = render(
+        <WorkspaceSplitView workspace={workspace} {...props} />
+      );
+
+      const splitNode = container.querySelector(
+        ".split-node-vertical"
+      ) as HTMLElement;
+      vi.spyOn(splitNode, "getBoundingClientRect").mockReturnValue({
+        width: 1000,
+        height: 600,
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 1000,
+        bottom: 600,
+        toJSON: () => ({}),
+      });
+
+      act(() => {
+        fireEvent.mouseDown(getByTestId("split-handle-p1"), { clientX: 500 });
+        fireEvent.mouseMove(window, { clientX: 650 });
+        fireEvent.mouseUp(window);
+      });
+
+      rerender(
+        <WorkspaceSplitView
+          workspace={workspace}
+          {...makeProps({ splitErrorToken: 1 })}
+        />
+      );
+
+      expect(splitNode.style.gridTemplateColumns).toBe("0.5fr 3px 0.5fr");
     });
   });
 

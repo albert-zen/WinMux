@@ -36,6 +36,7 @@ pub enum SplitOrientation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LayoutError {
     PaneNotFound,
+    SplitNotFound,
     InvalidRatio,
     WouldEmptyWorkspace,
     DuplicatePaneId,
@@ -142,6 +143,33 @@ impl LayoutNode {
             LayoutNode::Split { first, second, .. } => {
                 first.split_pane(source_id, new_pane.clone(), orientation.clone(), ratio)
                     || second.split_pane(source_id, new_pane, orientation, ratio)
+            }
+        }
+    }
+
+    fn first_leaf_id(&self) -> Option<&str> {
+        match self {
+            LayoutNode::Pane(slot) => Some(slot.pane_id.as_str()),
+            LayoutNode::Split { first, .. } => first.first_leaf_id(),
+        }
+    }
+
+    fn set_split_ratio(&mut self, split_id: &str, next_ratio: f64) -> bool {
+        match self {
+            LayoutNode::Pane(_) => false,
+            LayoutNode::Split {
+                ratio,
+                first,
+                second,
+                ..
+            } => {
+                if first.first_leaf_id() == Some(split_id) {
+                    *ratio = next_ratio;
+                    true
+                } else {
+                    first.set_split_ratio(split_id, next_ratio)
+                        || second.set_split_ratio(split_id, next_ratio)
+                }
             }
         }
     }
@@ -336,6 +364,16 @@ impl WorkspaceLayout {
             return Err(LayoutError::PaneNotFound);
         }
         self.focused_pane_id = pane_id.to_string();
+        Ok(())
+    }
+
+    pub fn set_split_ratio(&mut self, split_id: &str, ratio: f64) -> Result<(), LayoutError> {
+        if ratio <= 0.0 || ratio >= 1.0 {
+            return Err(LayoutError::InvalidRatio);
+        }
+        if !self.root.set_split_ratio(split_id, ratio) {
+            return Err(LayoutError::SplitNotFound);
+        }
         Ok(())
     }
 
@@ -745,6 +783,47 @@ mod tests {
             }
             _ => panic!("root should be a Split"),
         }
+    }
+
+    #[test]
+    fn set_split_ratio_updates_nested_split_by_first_leaf_key() {
+        let mut layout = WorkspaceLayout::starter();
+        layout
+            .split_pane("pane-1", "pane-2", SplitOrientation::Vertical, 0.5)
+            .expect("split 1");
+        layout
+            .split_pane("pane-2", "pane-3", SplitOrientation::Horizontal, 0.6)
+            .expect("split 2");
+
+        layout
+            .set_split_ratio("pane-2", 0.25)
+            .expect("nested split ratio should update");
+
+        match layout.root() {
+            LayoutNode::Split { second, .. } => match second.as_ref() {
+                LayoutNode::Split { ratio, .. } => {
+                    assert!(
+                        (*ratio - 0.25).abs() < f64::EPSILON,
+                        "ratio should be 0.25, got {}",
+                        ratio
+                    );
+                }
+                _ => panic!("second branch should remain a split"),
+            },
+            _ => panic!("root should be a Split"),
+        }
+    }
+
+    #[test]
+    fn set_split_ratio_rejects_unknown_split_keys() {
+        let mut layout = WorkspaceLayout::starter();
+        layout
+            .split_pane("pane-1", "pane-2", SplitOrientation::Vertical, 0.5)
+            .expect("split 1");
+
+        let err = layout.set_split_ratio("pane-missing", 0.4).unwrap_err();
+
+        assert_eq!(err, LayoutError::SplitNotFound);
     }
 
     #[test]

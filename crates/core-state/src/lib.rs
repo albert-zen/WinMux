@@ -324,6 +324,22 @@ impl WorkspaceRegistry {
         Ok(())
     }
 
+    pub fn set_split_ratio(
+        &mut self,
+        workspace_id: &str,
+        split_id: &str,
+        ratio: f64,
+    ) -> Result<(), WorkspaceError> {
+        let ws = self
+            .workspaces
+            .iter_mut()
+            .find(|w| w.id == workspace_id)
+            .ok_or(WorkspaceError::WorkspaceNotFound)?;
+
+        ws.layout.set_split_ratio(split_id, ratio)?;
+        Ok(())
+    }
+
     /// Serialize the registry to JSON for persistence.
     pub fn to_persisted_json(&self) -> serde_json::Result<String> {
         self.to_persisted_json_with_active(None)
@@ -632,6 +648,23 @@ mod tests {
         let err = reg.focus_pane("ws-missing", "pane-1").unwrap_err();
 
         assert_eq!(err, WorkspaceError::WorkspaceNotFound);
+    }
+
+    #[test]
+    fn set_split_ratio_delegates_to_layout_and_updates_the_target_workspace() {
+        let mut reg = make_registry_with_two();
+        reg.split_pane("ws-b", "pane-1", "pane-2", SplitOrientation::Vertical, 0.5)
+            .expect("split should work");
+
+        reg.set_split_ratio("ws-b", "pane-1", 0.3)
+            .expect("ratio update should work");
+
+        match reg.list()[1].layout.root() {
+            core_layout::LayoutNode::Split { ratio, .. } => {
+                assert!((*ratio - 0.3).abs() < f64::EPSILON);
+            }
+            _ => panic!("workspace layout should remain split"),
+        }
     }
 
     #[test]

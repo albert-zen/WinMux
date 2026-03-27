@@ -35,6 +35,14 @@ export function paneSplit(
   return invoke("pane_split", { workspaceId, paneId, direction });
 }
 
+export function paneResizeSplit(
+  workspaceId: string,
+  splitId: string,
+  ratio: number,
+): Promise<void> {
+  return invoke("pane_resize_split", { workspaceId, splitId, ratio });
+}
+
 export function sessionRestart(sessionId: string): Promise<void> {
   return invoke("session_restart", { sessionId });
 }

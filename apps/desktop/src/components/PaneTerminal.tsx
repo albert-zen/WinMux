@@ -8,9 +8,10 @@ interface Props {
   pane: PaneState;
   isFocused: boolean;
   theme?: ActiveThemeState;
+  focusRequestToken?: number;
 }
 
-export function PaneTerminal({ pane, isFocused, theme }: Props) {
+export function PaneTerminal({ pane, isFocused, theme, focusRequestToken = 0 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const liveSessionRef = useRef({
     sessionId: pane.sessionId,
@@ -124,7 +125,7 @@ export function PaneTerminal({ pane, isFocused, theme }: Props) {
     if (isFocused) {
       terminalRef.current?.focus();
     }
-  }, [isFocused]);
+  }, [focusRequestToken, isFocused]);
 
   const overlayMessage =
     pane.status === "exited"

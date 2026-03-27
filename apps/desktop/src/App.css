@@ -92,10 +92,10 @@ button {
   padding: 10px 8px;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  gap: 4px;
-  min-height: 48px;
+  gap: 3px;
+  min-height: 62px;
   transition: all 0.15s ease;
   position: relative;
 }
@@ -134,12 +134,28 @@ button {
 
 .workspace-tab-name {
   font-size: 11px;
-  text-align: center;
+  text-align: left;
   line-height: 1.2;
-  max-width: 40px;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.workspace-tab-meta {
+  font-size: 10px;
+  color: #666;
+  line-height: 1.2;
+}
+
+.workspace-tab-issue-badge {
+  margin-top: 2px;
+  font-size: 10px;
+  color: #f0b48f;
+  background: #2d1f16;
+  border: 1px solid #5a3a24;
+  border-radius: 999px;
+  padding: 1px 6px;
 }
 
 .workspace-tab-badge {
@@ -623,6 +639,10 @@ button {
 .workspace-switcher-item-path {
   color: #828b9c;
   font-size: 12px;
+}
+
+.workspace-switcher-item-create .workspace-switcher-item-name {
+  color: #c7dcff;
 }
 
 .workspace-switcher-empty {

@@ -7,6 +7,7 @@ interface Props {
   mru: string[];
   activeWorkspaceId: string | null;
   onSelect: (workspaceId: string) => void;
+  onCreateFromQuery?: (query: string) => void;
   onClose: () => void;
 }
 
@@ -16,6 +17,7 @@ export function WorkspaceSwitcher({
   mru,
   activeWorkspaceId,
   onSelect,
+  onCreateFromQuery,
   onClose,
 }: Props) {
   const [filter, setFilter] = useState("");
@@ -41,6 +43,17 @@ export function WorkspaceSwitcher({
       ws.rootDir.toLowerCase().includes(lowerFilter)
     );
   });
+  const trimmedFilter = filter.trim();
+  const exactMatchExists = filteredWorkspaces.some(
+    (workspace) =>
+      workspace.name.toLowerCase() === trimmedFilter.toLowerCase() ||
+      workspace.rootDir.toLowerCase() === trimmedFilter.toLowerCase(),
+  );
+  const createOption =
+    onCreateFromQuery && trimmedFilter && !exactMatchExists
+      ? { query: trimmedFilter }
+      : null;
+  const selectableCount = filteredWorkspaces.length + (createOption ? 1 : 0);
 
   // Reset filter and selection when opening
   useEffect(() => {
@@ -67,13 +80,13 @@ export function WorkspaceSwitcher({
         case "ArrowDown":
           event.preventDefault();
           setSelectedIndex((prev) =>
-            prev < filteredWorkspaces.length - 1 ? prev + 1 : 0
+            prev < selectableCount - 1 ? prev + 1 : 0
           );
           break;
         case "ArrowUp":
           event.preventDefault();
           setSelectedIndex((prev) =>
-            prev > 0 ? prev - 1 : filteredWorkspaces.length - 1
+            prev > 0 ? prev - 1 : selectableCount - 1
           );
           break;
         case "Enter":
@@ -82,11 +95,15 @@ export function WorkspaceSwitcher({
           if (selected) {
             onSelect(selected.id);
             onClose();
+            return;
+          }
+          if (createOption && selectedIndex === filteredWorkspaces.length) {
+            onCreateFromQuery?.(createOption.query);
           }
           break;
       }
     },
-    [filteredWorkspaces, selectedIndex, onSelect, onClose]
+    [createOption, filteredWorkspaces, onClose, onCreateFromQuery, onSelect, selectableCount, selectedIndex]
   );
 
   const handleFilterChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -123,26 +140,41 @@ export function WorkspaceSwitcher({
           onKeyDown={handleKeyDown}
         />
         <div className="workspace-switcher-list">
-          {filteredWorkspaces.length === 0 ? (
+          {filteredWorkspaces.length === 0 && !createOption ? (
             <div className="workspace-switcher-empty">No workspaces found</div>
           ) : (
-            filteredWorkspaces.map((ws, index) => {
-              const isActive = ws.id === activeWorkspaceId;
-              const isSelected = index === selectedIndex;
+            <>
+              {filteredWorkspaces.map((ws, index) => {
+                const isActive = ws.id === activeWorkspaceId;
+                const isSelected = index === selectedIndex;
 
-              return (
+                return (
+                  <button
+                    key={ws.id}
+                    type="button"
+                    className={`workspace-switcher-item${isActive ? " workspace-switcher-item-active" : ""}${isSelected ? " workspace-switcher-item-selected" : ""}`}
+                    onClick={() => handleWorkspaceClick(ws.id)}
+                    onMouseEnter={() => setSelectedIndex(index)}
+                  >
+                    <div className="workspace-switcher-item-name">{ws.name}</div>
+                    <div className="workspace-switcher-item-path">{ws.rootDir}</div>
+                  </button>
+                );
+              })}
+              {createOption ? (
                 <button
-                  key={ws.id}
                   type="button"
-                  className={`workspace-switcher-item${isActive ? " workspace-switcher-item-active" : ""}${isSelected ? " workspace-switcher-item-selected" : ""}`}
-                  onClick={() => handleWorkspaceClick(ws.id)}
-                  onMouseEnter={() => setSelectedIndex(index)}
+                  className={`workspace-switcher-item workspace-switcher-item-create${selectedIndex === filteredWorkspaces.length ? " workspace-switcher-item-selected" : ""}`}
+                  onClick={() => {
+                    onCreateFromQuery?.(createOption.query);
+                  }}
+                  onMouseEnter={() => setSelectedIndex(filteredWorkspaces.length)}
                 >
-                  <div className="workspace-switcher-item-name">{ws.name}</div>
-                  <div className="workspace-switcher-item-path">{ws.rootDir}</div>
+                  <div className="workspace-switcher-item-name">Create workspace "{createOption.query}"</div>
+                  <div className="workspace-switcher-item-path">Open the create dialog with this query</div>
                 </button>
-              );
-            })
+              ) : null}
+            </>
           )}
         </div>
       </div>

@@ -7,6 +7,7 @@ import { useDesktopState } from "./hooks/useDesktopState";
 import {
   paneClose,
   paneFocus,
+  paneResizeSplit,
   paneSplit,
   sessionRestart,
   setActiveWorkspace,
@@ -22,6 +23,7 @@ vi.mock("./hooks/useDesktopState", () => ({
 vi.mock("./lib/desktopClient", () => ({
   paneClose: vi.fn(),
   paneFocus: vi.fn(),
+  paneResizeSplit: vi.fn(),
   paneSplit: vi.fn(),
   sessionRestart: vi.fn(),
   setActiveWorkspace: vi.fn(),
@@ -48,28 +50,39 @@ vi.mock("./components/CreateWorkspaceModal", () => ({
       isOpen,
       onClose,
       onCreate,
+      error,
+      defaultName,
+      defaultRootDir,
     }: {
       isOpen: boolean;
       onClose: () => void;
       onCreate: (config: { name: string; rootDir: string; shellProfile: string }) => void;
+      error?: string | null;
+      defaultName?: string;
+      defaultRootDir?: string;
     }) =>
       isOpen ? (
         <div role="dialog" aria-label="New Workspace" data-testid="create-workspace-modal">
           <button
             type="button"
-            onClick={() =>
-              onCreate({
+            onClick={() => {
+              void Promise.resolve(
+                onCreate({
                 name: "alpha",
                 rootDir: "D:\\dev\\alpha",
                 shellProfile: "pwsh",
-              })
-            }
+                }),
+              ).catch(() => {});
+            }}
           >
             Submit workspace
           </button>
           <button type="button" onClick={onClose}>
             Cancel workspace
           </button>
+          {error ? <div>{error}</div> : null}
+          <div data-testid="create-default-name">{defaultName ?? ""}</div>
+          <div data-testid="create-default-root">{defaultRootDir ?? ""}</div>
         </div>
       ) : null,
   ),
@@ -192,6 +205,7 @@ function makeState(
 describe("App", () => {
   beforeEach(() => {
     vi.mocked(paneSplit).mockResolvedValue(undefined);
+    vi.mocked(paneResizeSplit).mockResolvedValue(undefined);
     vi.mocked(sessionRestart).mockResolvedValue(undefined);
     vi.mocked(paneClose).mockResolvedValue(undefined);
     vi.mocked(paneFocus).mockResolvedValue(undefined);
@@ -229,6 +243,22 @@ describe("App", () => {
     expect(screen.getByRole("alert").textContent).toContain("desktop state failed");
     fireEvent.click(screen.getByRole("button", { name: "Dismiss error" }));
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("surfaces restore issues from desktop state", () => {
+    vi.mocked(useDesktopState).mockReturnValue({
+      state: {
+        ...makeState().state!,
+        restoreIssue: "Restored starter workspace after the saved state could not be loaded.",
+      } as DesktopState,
+      error: null,
+    });
+
+    render(<App />);
+
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Restored starter workspace after the saved state could not be loaded.",
+    );
   });
 
   it("confirms workspace close when the workspace has a live pane", async () => {
@@ -406,5 +436,45 @@ describe("App", () => {
 
     expect(screen.queryByTestId("create-workspace-modal")).toBeNull();
     expect(screen.getByRole("button", { name: "Close workspace alpha" })).toBeTruthy();
+  });
+
+  it("keeps the create modal open and shows the error when workspace creation fails", async () => {
+    vi.mocked(workspaceCreate).mockRejectedValueOnce(new Error("create failed"));
+    render(<App />);
+
+    fireEvent.keyDown(document.body, { key: "n", ctrlKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "Submit workspace" }));
+
+    expect(await screen.findByText("create failed")).toBeTruthy();
+    expect(screen.getByTestId("create-workspace-modal")).toBeTruthy();
+  });
+
+  it("clears a stale create error when reopening the modal", async () => {
+    vi.mocked(workspaceCreate).mockRejectedValueOnce(new Error("create failed"));
+    render(<App />);
+
+    fireEvent.keyDown(document.body, { key: "n", ctrlKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "Submit workspace" }));
+    expect(await screen.findByText("create failed")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel workspace" }));
+    fireEvent.keyDown(document.body, { key: "n", ctrlKey: true });
+
+    expect(screen.queryByText("create failed")).toBeNull();
+  });
+
+  it("opens the create modal from the switcher with the query as the default name", async () => {
+    render(<App />);
+
+    fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
+    fireEvent.change(screen.getByRole("textbox", { name: "Switch workspace" }), {
+      target: { value: "docs-hub" },
+    });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Switch workspace" }), {
+      key: "Enter",
+    });
+
+    expect(screen.getByTestId("create-workspace-modal")).toBeTruthy();
+    expect(screen.getByTestId("create-default-name").textContent).toBe("docs-hub");
   });
 });

@@ -40,6 +40,7 @@ struct RuntimeState<F> {
     themes: ThemeRegistry,
     state_path: Option<PathBuf>,
     active_workspace_id: Option<String>,
+    restore_issue: Option<String>,
     pane_errors: HashMap<(String, String), String>,
 }
 
@@ -73,6 +74,8 @@ struct DesktopState {
     workspaces: Vec<WorkspaceState>,
     active_workspace_id: Option<String>,
     active_theme: ActiveThemeState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    restore_issue: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -84,6 +87,10 @@ struct ActiveThemeState {
     background: String,
     cursor: String,
     selection: String,
+}
+
+fn format_start_failure(prefix: &str, root_dir: &str, error: &str) -> String {
+    format!("{prefix} in {root_dir}: {error}")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -129,6 +136,7 @@ where
             themes: ThemeRegistry::with_builtins(),
             state_path: None,
             active_workspace_id: None,
+            restore_issue: None,
             pane_errors: HashMap::new(),
         };
         runtime.ensure_sessions_for_all_panes();
@@ -147,6 +155,7 @@ where
             themes: ThemeRegistry::with_builtins(),
             state_path: Some(state_path),
             active_workspace_id: None,
+            restore_issue: None,
             pane_errors: HashMap::new(),
         };
         runtime.ensure_sessions_for_all_panes();
@@ -227,8 +236,17 @@ where
                     ) {
                         self.pane_errors.insert(
                             (workspace_id.clone(), pane_id.clone()),
-                            error.to_string(),
+                            format_start_failure(
+                                "Restore could not relaunch pane",
+                                &root_dir,
+                                &error.to_string(),
+                            ),
                         );
+                        if self.state_path.is_some() {
+                            self.restore_issue.get_or_insert_with(|| {
+                                "Restored workspaces, but one or more panes could not relaunch. Check pane feedback for details.".to_string()
+                            });
+                        }
                     } else {
                         self.clear_pane_error(&workspace_id, &pane_id);
                     }
@@ -311,6 +329,7 @@ where
                 cursor: active_theme.palette.cursor.clone(),
                 selection: active_theme.palette.selection.clone(),
             },
+            restore_issue: self.restore_issue.clone(),
         }
     }
 
@@ -466,6 +485,40 @@ fn pane_focus(
             .error()
             .map(|error| error.message.clone())
             .unwrap_or_else(|| "pane focus failed".to_string()))
+    }
+}
+
+#[tauri::command]
+fn pane_resize_split(
+    workspace_id: String,
+    split_id: String,
+    ratio: f64,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    let request = RequestEnvelope::new(
+        "desktop-pane-set-split-ratio",
+        "pane.setSplitRatio",
+        json!({
+            "workspaceId": workspace_id,
+            "splitId": split_id,
+            "ratio": ratio,
+        }),
+    );
+    let response = dispatch_runtime_request(&request, &mut state.runtime.lock().unwrap());
+    if response.is_ok() {
+        let workspace_id = request.payload()["workspaceId"].as_str().unwrap_or_default();
+        let split_id = request.payload()["splitId"].as_str().unwrap_or_default();
+        let _ = app_handle.emit(
+            DOMAIN_EVENT_NAME,
+            DomainEvent::split_ratio_changed(workspace_id, split_id, ratio),
+        );
+        Ok(())
+    } else {
+        Err(response
+            .error()
+            .map(|error| error.message.clone())
+            .unwrap_or_else(|| "pane resize split failed".to_string()))
     }
 }
 
@@ -845,26 +898,6 @@ fn serialize_response(response: ResponseEnvelope) -> String {
     })
 }
 
-fn runtime_error_response(id: &str, error: SessionRuntimeError) -> ResponseEnvelope {
-    match error {
-        SessionRuntimeError::SessionNotFound => ResponseEnvelope::error(
-            id,
-            ProtocolError::new(ErrorCode::NotFound, "Session not found"),
-        ),
-        SessionRuntimeError::SessionNotExited => ResponseEnvelope::error(
-            id,
-            ProtocolError::new(ErrorCode::Conflict, "Session has not exited"),
-        ),
-        SessionRuntimeError::PaneAlreadyBound => ResponseEnvelope::error(
-            id,
-            ProtocolError::new(ErrorCode::Conflict, "Pane already has an active session"),
-        ),
-        SessionRuntimeError::Host(message) => {
-            ResponseEnvelope::error(id, ProtocolError::new(ErrorCode::InternalError, message))
-        }
-    }
-}
-
 fn dispatch_runtime_request<F>(
     request: &RequestEnvelope,
     runtime: &mut RuntimeState<F>,
@@ -877,6 +910,7 @@ where
         "workspace.close" => handle_workspace_close(request, runtime),
         "workspace.rename" => handle_workspace_rename(request, runtime),
         "pane.split" => handle_pane_split(request, runtime),
+        "pane.setSplitRatio" => handle_pane_set_split_ratio(request, runtime),
         "pane.focus" => handle_pane_focus(request, runtime),
         "pane.close" => handle_pane_close(request, runtime),
         "session.start" => handle_session_start(request, runtime),
@@ -909,6 +943,20 @@ where
 }
 
 fn handle_workspace_rename<F>(
+    request: &RequestEnvelope,
+    runtime: &mut RuntimeState<F>,
+) -> ResponseEnvelope
+where
+    F: SessionHostFactory,
+{
+    let response = core_ipc::dispatch(request, &mut runtime.registry);
+    if response.is_ok() {
+        runtime.save_registry();
+    }
+    response
+}
+
+fn handle_pane_set_split_ratio<F>(
     request: &RequestEnvelope,
     runtime: &mut RuntimeState<F>,
 ) -> ResponseEnvelope
@@ -1059,7 +1107,7 @@ where
         &workspace_id,
         &pane_id,
         SessionSpec::new(format!("{workspace_id}:{pane_id}"), &shell_profile)
-            .with_working_dir(root_dir),
+            .with_working_dir(root_dir.clone()),
         default_terminal_size(),
     ) {
         Ok(session_id) => {
@@ -1076,14 +1124,19 @@ where
             )
         }
         Err(error) => {
+            let message = format_start_failure(
+                "Workspace creation could not start a shell",
+                &root_dir,
+                &error.to_string(),
+            );
             runtime.pane_errors.insert(
                 (workspace_id.clone(), pane_id.clone()),
-                error.to_string(),
+                message.clone(),
             );
             runtime.save_registry();
             ResponseEnvelope::error(
                 request.id(),
-                ProtocolError::new(ErrorCode::Conflict, error.to_string()),
+                ProtocolError::new(ErrorCode::Conflict, message),
             )
         }
     }
@@ -1178,7 +1231,7 @@ where
         &workspace_id,
         &pane_id,
         SessionSpec::new(format!("{workspace_id}:{pane_id}"), &shell_profile)
-            .with_working_dir(root_dir),
+            .with_working_dir(root_dir.clone()),
         default_terminal_size(),
     ) {
         Ok(session_id) => {
@@ -1194,15 +1247,20 @@ where
             )
         }
         Err(error) => {
+            let message = format_start_failure(
+                "Pane split could not start a shell",
+                &root_dir,
+                &error.to_string(),
+            );
             runtime.pane_errors.insert(
                 (workspace_id.clone(), pane_id.clone()),
-                error.to_string(),
+                message.clone(),
             );
             rollback_split_panes(&mut runtime.registry, &workspace_id, &existing_pane_ids);
             runtime.save_registry();
             ResponseEnvelope::error(
                 request.id(),
-                ProtocolError::new(ErrorCode::Conflict, error.to_string()),
+                ProtocolError::new(ErrorCode::Conflict, message),
             )
         }
     }
@@ -1264,10 +1322,25 @@ where
             )
         }
         Err(error) => {
+            let message = match &error {
+                SessionRuntimeError::Host(_) => format_start_failure(
+                    "Session start could not launch the pane",
+                    &workspace.root_dir,
+                    &error.to_string(),
+                ),
+                SessionRuntimeError::SessionNotFound => "Session not found".to_string(),
+                SessionRuntimeError::SessionNotExited => "Session has not exited".to_string(),
+                SessionRuntimeError::PaneAlreadyBound => {
+                    "Pane already has an active session".to_string()
+                }
+            };
             runtime
                 .pane_errors
-                .insert((workspace_id.to_string(), pane_id.to_string()), error.to_string());
-            runtime_error_response(request.id(), error)
+                .insert((workspace_id.to_string(), pane_id.to_string()), message.clone());
+            ResponseEnvelope::error(
+                request.id(),
+                ProtocolError::new(ErrorCode::Conflict, message),
+            )
         }
     }
 }
@@ -1299,9 +1372,18 @@ where
         if response.is_ok() {
             runtime.clear_pane_error(&workspace_id, &pane_id);
         } else if let Some(message) = response.error().map(|error| error.message.clone()) {
+            let formatted_message = find_workspace(&runtime.registry, &workspace_id)
+                .map(|workspace| {
+                    format_start_failure(
+                        "Restart could not relaunch pane",
+                        &workspace.root_dir,
+                        &message,
+                    )
+                })
+                .unwrap_or(message);
             runtime
                 .pane_errors
-                .insert((workspace_id, pane_id), message);
+                .insert((workspace_id, pane_id), formatted_message);
         }
     }
 
@@ -1453,7 +1535,7 @@ async fn handle_pipe_connection(
     }
 }
 
-fn load_registry_from_state_path(path: &std::path::Path) -> (WorkspaceRegistry, Option<String>) {
+fn load_registry_from_state_path(path: &std::path::Path) -> (WorkspaceRegistry, Option<String>, Option<String>) {
     match std::fs::read_to_string(path) {
         Ok(json) => {
             match WorkspaceRegistry::from_persisted_json_with_active(&json) {
@@ -1461,19 +1543,23 @@ fn load_registry_from_state_path(path: &std::path::Path) -> (WorkspaceRegistry, 
                     let active_id = result.active_workspace_id.or_else(|| {
                         result.registry.list().first().map(|ws| ws.id.clone())
                     });
-                    (result.registry, active_id)
+                    (result.registry, active_id, None)
                 }
                 Err(_) => {
                     let registry = core_state::starter_workspace_registry();
                     let active_id = registry.list().first().map(|ws| ws.id.clone());
-                    (registry, active_id)
+                    (
+                        registry,
+                        active_id,
+                        Some("Saved workspace state could not be loaded. Opened the starter workspace instead.".to_string()),
+                    )
                 }
             }
         }
         Err(_) => {
             let registry = core_state::starter_workspace_registry();
             let active_id = registry.list().first().map(|ws| ws.id.clone());
-            (registry, active_id)
+            (registry, active_id, None)
         }
     }
 }
@@ -1485,13 +1571,17 @@ pub fn run() {
         .join("cmux-win")
         .join("state.json");
 
-    let (registry, active_workspace_id) = load_registry_from_state_path(&state_path);
+    let (registry, active_workspace_id, restore_issue) = load_registry_from_state_path(&state_path);
     let runtime = Arc::new(Mutex::new(RuntimeState::new_with_state_path(
         registry,
         PtySessionFactory,
         state_path,
     )));
-    runtime.lock().unwrap().active_workspace_id = active_workspace_id;
+    {
+        let mut runtime_guard = runtime.lock().unwrap();
+        runtime_guard.active_workspace_id = active_workspace_id;
+        runtime_guard.restore_issue = restore_issue.or(runtime_guard.restore_issue.take());
+    }
     let event_runtime = Arc::clone(&runtime);
 
     #[cfg(target_os = "windows")]
@@ -1513,6 +1603,7 @@ pub fn run() {
             workspace_close,
             workspace_rename,
             pane_split,
+            pane_resize_split,
             pane_focus,
             pane_close,
             session_send_input,
@@ -1677,7 +1768,9 @@ mod tests {
         assert_eq!(snapshot.workspaces[0].pane_states["pane-1"].status, "none");
         assert_eq!(
             snapshot.workspaces[0].pane_states["pane-1"].status_message.as_deref(),
-            Some("working directory not found: D:\\missing\\starter")
+            Some(
+                "Restore could not relaunch pane in D:\\missing\\starter: working directory not found: D:\\missing\\starter",
+            )
         );
         assert_eq!(snapshot.workspaces[0].pane_states["pane-1"].session_id, None);
     }
@@ -1981,7 +2074,9 @@ mod tests {
             .unwrap();
         assert_eq!(
             workspace.pane_states[&pane_id].status_message.as_deref(),
-            Some("working directory not found: D:\\missing\\api")
+            Some(
+                "Workspace creation could not start a shell in D:\\missing\\api: working directory not found: D:\\missing\\api",
+            )
         );
         assert_eq!(workspace.pane_states[&pane_id].status, "none");
     }
@@ -2104,7 +2199,8 @@ mod tests {
         let workspace_id = response.result().unwrap()["workspaceId"].as_str().unwrap();
         assert_eq!(runtime.active_workspace_id.as_deref(), Some(workspace_id));
 
-        let (_registry, restored_active_id) = load_registry_from_state_path(&state_path);
+        let (_registry, restored_active_id, _restore_issue) =
+            load_registry_from_state_path(&state_path);
         assert_eq!(restored_active_id.as_deref(), Some(workspace_id));
 
         let _ = fs::remove_file(state_path);
@@ -2306,7 +2402,9 @@ mod tests {
         let snapshot = runtime.snapshot();
         assert_eq!(
             snapshot.workspaces[0].pane_states["pane-1"].status_message.as_deref(),
-            Some("working directory not found: D:\\dev\\inbox")
+            Some(
+                "Restart could not relaunch pane in D:\\dev\\inbox: working directory not found: D:\\dev\\inbox",
+            )
         );
         assert_eq!(snapshot.workspaces[0].pane_states["pane-1"].status, "none");
         assert_eq!(snapshot.workspaces[0].pane_states["pane-1"].session_id, None);
@@ -3006,11 +3104,16 @@ mod tests {
 
         let split_response = handle_pane_split(&split, &mut runtime);
         assert!(split_response.is_ok());
+        runtime
+            .registry
+            .set_split_ratio("ws-inbox", "pane-1", 0.72)
+            .expect("ratio update should persist");
+        runtime.save_registry();
         let rename_response = handle_workspace_rename(&rename, &mut runtime);
         assert!(rename_response.is_ok());
         assert!(state_path.exists());
 
-        let (restored_registry, _active_id) = load_registry_from_state_path(&state_path);
+        let (restored_registry, _active_id, restore_issue) = load_registry_from_state_path(&state_path);
         let restored_factory = FakeFactory::default();
         let mut restored_runtime = RuntimeState::new(restored_registry, restored_factory.clone());
         let snapshot = restored_runtime.snapshot();
@@ -3026,6 +3129,13 @@ mod tests {
                 Some("D:\\dev\\inbox".to_string()),
             ]
         );
+        assert!(restore_issue.is_none());
+        match &snapshot.workspaces[0].layout {
+            LayoutNode::Split { ratio, .. } => {
+                assert!((*ratio - 0.72).abs() < f64::EPSILON);
+            }
+            _ => panic!("restored layout should remain split"),
+        }
 
         let _ = fs::remove_file(state_path);
     }
@@ -3036,11 +3146,15 @@ mod tests {
         fs::create_dir_all(state_path.parent().unwrap()).expect("state dir should exist");
         fs::write(&state_path, "{invalid").expect("invalid state should be written");
 
-        let (restored_registry, active_id) = load_registry_from_state_path(&state_path);
+        let (restored_registry, active_id, restore_issue) = load_registry_from_state_path(&state_path);
 
         assert_eq!(restored_registry.list().len(), 1);
         assert_eq!(restored_registry.list()[0].id, "ws-inbox");
         assert_eq!(active_id, Some("ws-inbox".to_string()));
+        assert_eq!(
+            restore_issue.as_deref(),
+            Some("Saved workspace state could not be loaded. Opened the starter workspace instead.")
+        );
 
         let _ = fs::remove_file(state_path);
     }
@@ -3064,10 +3178,11 @@ mod tests {
         fs::create_dir_all(state_path.parent().unwrap()).unwrap();
         fs::write(&state_path, &json).unwrap();
 
-        let (restored_registry, active_id) = load_registry_from_state_path(&state_path);
+        let (restored_registry, active_id, restore_issue) = load_registry_from_state_path(&state_path);
 
         assert_eq!(restored_registry.list().len(), 2);
         assert_eq!(active_id, Some("ws-api".to_string()));
+        assert!(restore_issue.is_none());
 
         let _ = fs::remove_file(state_path);
     }
@@ -3083,10 +3198,11 @@ mod tests {
         runtime.active_workspace_id = Some("ws-inbox".to_string());
         runtime.save_registry();
 
-        let (restored_registry, active_id) = load_registry_from_state_path(&state_path);
+        let (restored_registry, active_id, restore_issue) = load_registry_from_state_path(&state_path);
 
         assert_eq!(restored_registry.list().len(), 1);
         assert_eq!(active_id, Some("ws-inbox".to_string()));
+        assert!(restore_issue.is_none());
 
         let _ = fs::remove_file(state_path);
     }
@@ -3110,10 +3226,11 @@ mod tests {
         fs::create_dir_all(state_path.parent().unwrap()).unwrap();
         fs::write(&state_path, &json).unwrap();
 
-        let (restored_registry, active_id) = load_registry_from_state_path(&state_path);
+        let (restored_registry, active_id, restore_issue) = load_registry_from_state_path(&state_path);
 
         assert_eq!(restored_registry.list().len(), 2);
         assert_eq!(active_id, Some("ws-inbox".to_string()));
+        assert!(restore_issue.is_none());
 
         let _ = fs::remove_file(state_path);
     }
@@ -3194,7 +3311,8 @@ mod tests {
         assert!(close_response.is_ok());
         assert_eq!(runtime.active_workspace_id, Some("ws-inbox".to_string()));
 
-        let (_restored_registry, restored_active_id) = load_registry_from_state_path(&state_path);
+        let (_restored_registry, restored_active_id, _restore_issue) =
+            load_registry_from_state_path(&state_path);
         assert_eq!(restored_active_id, Some("ws-inbox".to_string()));
 
         let _ = fs::remove_file(state_path);

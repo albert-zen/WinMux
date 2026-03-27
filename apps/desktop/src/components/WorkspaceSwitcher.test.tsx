@@ -96,4 +96,28 @@ describe("WorkspaceSwitcher", () => {
     expect(onSelect).toHaveBeenCalledWith("ws-web");
     expect(onClose).toHaveBeenCalled();
   });
+
+  it("offers a create action for an unmatched query", () => {
+    const onClose = vi.fn();
+    const onCreateFromQuery = vi.fn();
+
+    render(
+      <WorkspaceSwitcher
+        isOpen
+        workspaces={[makeWorkspace("ws-api", "api", "D:\\dev\\api")]}
+        mru={["ws-api"]}
+        activeWorkspaceId="ws-api"
+        onClose={onClose}
+        onSelect={() => {}}
+        onCreateFromQuery={onCreateFromQuery}
+      />,
+    );
+
+    const input = screen.getByRole("textbox", { name: "Switch workspace" });
+    fireEvent.change(input, { target: { value: "docs-hub" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onCreateFromQuery).toHaveBeenCalledWith("docs-hub");
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });

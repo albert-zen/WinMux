@@ -105,6 +105,7 @@ export type DesktopState = {
   workspaces: WorkspaceState[];
   activeWorkspaceId: string | null;
   activeTheme: ActiveThemeState;
+  restoreIssue?: string | null;
 };
 
 export type ThemeListResponse = {
@@ -166,6 +167,7 @@ export type DomainEvent =
   | { type: "paneSplit"; workspaceId: string; paneId: string; newPaneId: string }
   | { type: "paneClosed"; workspaceId: string; paneId: string }
   | { type: "paneFocused"; workspaceId: string; paneId: string }
+  | { type: "splitRatioChanged"; workspaceId: string; splitId: string; ratio: number }
   | { type: "sessionStarted"; sessionId: string; workspaceId: string; paneId: string }
   | { type: "sessionExited"; sessionId: string }
   | { type: "notificationCreated"; notificationId: string };

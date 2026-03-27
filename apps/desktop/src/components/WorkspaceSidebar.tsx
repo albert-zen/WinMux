@@ -7,6 +7,7 @@ interface Props {
   onSelectWorkspace: (id: string) => void;
   onNewWorkspace: () => void;
   notificationCounts: Record<string, number>;
+  issueCounts: Record<string, number>;
 }
 
 export function WorkspaceSidebar({
@@ -15,6 +16,7 @@ export function WorkspaceSidebar({
   onSelectWorkspace,
   onNewWorkspace,
   notificationCounts,
+  issueCounts,
 }: Props) {
   return (
     <aside className="workspace-sidebar">
@@ -22,8 +24,10 @@ export function WorkspaceSidebar({
         {workspaces.map((workspace, index) => {
           const isActive = workspace.id === activeWorkspaceId;
           const notificationCount = notificationCounts[workspace.id] ?? 0;
+          const issueCount = issueCounts[workspace.id] ?? 0;
           const hasNotification = notificationCount > 0;
           const shortcutHint = index < 9 ? `\nCtrl+${index + 1}` : "";
+          const paneLabel = `${paneCount(workspace.layout)} pane${paneCount(workspace.layout) === 1 ? "" : "s"}`;
 
           return (
             <button
@@ -38,7 +42,14 @@ export function WorkspaceSidebar({
                 workspace.layout,
               )} panes${shortcutHint}`}
             >
-              <span className="workspace-tab-name">{workspace.name.slice(0, 12)}</span>
+              <span className="workspace-tab-name">{workspace.name.slice(0, 20)}</span>
+              <span className="workspace-tab-meta">{workspace.shellProfile}</span>
+              <span className="workspace-tab-meta">{paneLabel}</span>
+              {issueCount > 0 ? (
+                <span className="workspace-tab-issue-badge">
+                  {issueCount} issue{issueCount === 1 ? "" : "s"}
+                </span>
+              ) : null}
               {hasNotification ? (
                 <span className="workspace-tab-badge">{notificationCount}</span>
               ) : null}

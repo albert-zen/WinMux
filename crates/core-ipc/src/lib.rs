@@ -316,6 +316,7 @@ pub fn validate_request(request: &RequestEnvelope) -> Result<(), ProtocolError> 
     match request.command.as_str() {
         "workspace.create" => validate_workspace_create_payload(&request.payload),
         "pane.split" => validate_pane_split_payload(&request.payload),
+        "pane.setSplitRatio" => validate_pane_set_split_ratio_payload(&request.payload),
         "pane.close" => validate_pane_close_payload(&request.payload),
         "pane.focus" => validate_pane_focus_payload(&request.payload),
         "session.start" => validate_session_start_payload(&request.payload),
@@ -390,6 +391,23 @@ fn validate_pane_close_payload(payload: &Value) -> Result<(), ProtocolError> {
     let object = payload_object(payload)?;
     required_string_field(object, "workspaceId")?;
     required_string_field(object, "paneId")?;
+    Ok(())
+}
+
+fn validate_pane_set_split_ratio_payload(payload: &Value) -> Result<(), ProtocolError> {
+    let object = payload_object(payload)?;
+    required_string_field(object, "workspaceId")?;
+    required_string_field(object, "splitId")?;
+    let ratio = object
+        .get("ratio")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| ProtocolError::new(ErrorCode::InvalidPayload, "Missing required field: ratio"))?;
+    if ratio <= 0.0 || ratio >= 1.0 {
+        return Err(ProtocolError::new(
+            ErrorCode::InvalidPayload,
+            "Invalid field ratio: expected a number between 0 and 1",
+        ));
+    }
     Ok(())
 }
 
@@ -939,6 +957,46 @@ mod tests {
     }
 
     #[test]
+    fn parse_and_validate_accepts_valid_split_ratio_requests() {
+        let request = parse_and_validate_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req_126",
+                "type": "command",
+                "command": "pane.setSplitRatio",
+                "payload": {
+                    "workspaceId": "ws_1",
+                    "splitId": "pane_1",
+                    "ratio": 0.4
+                }
+            }"#,
+        )
+        .expect("valid pane.setSplitRatio should pass");
+
+        assert_eq!(request.command(), "pane.setSplitRatio");
+    }
+
+    #[test]
+    fn parse_and_validate_rejects_invalid_split_ratio_requests() {
+        let err = parse_and_validate_request(
+            r#"{
+                "protocolVersion": 1,
+                "id": "req_127",
+                "type": "command",
+                "command": "pane.setSplitRatio",
+                "payload": {
+                    "workspaceId": "ws_1",
+                    "splitId": "pane_1",
+                    "ratio": 1.0
+                }
+            }"#,
+        )
+        .expect_err("invalid pane.setSplitRatio should fail");
+
+        assert_eq!(err.code, ErrorCode::InvalidPayload);
+    }
+
+    #[test]
     fn parse_and_validate_accepts_valid_pane_close_requests() {
         let request = parse_and_validate_request(
             r#"{
@@ -1316,6 +1374,7 @@ pub fn dispatch(request: &RequestEnvelope, registry: &mut WorkspaceRegistry) -> 
         "workspace.close" => handle_workspace_close(request, registry),
         "workspace.rename" => handle_workspace_rename(request, registry),
         "pane.split" => handle_pane_split(request, registry),
+        "pane.setSplitRatio" => handle_pane_set_split_ratio(request, registry),
         "pane.close" => handle_pane_close(request, registry),
         "pane.focus" => handle_pane_focus(request, registry),
         "notify.send" => handle_notify_send(request),
@@ -1364,7 +1423,7 @@ pub fn dispatch_runtime<F: SessionHostFactory>(
     match request.command() {
         // Workspace and pane commands delegate to existing dispatch
         "workspace.create" | "workspace.close" | "workspace.rename"
-        | "pane.split" | "pane.close" | "pane.focus"
+        | "pane.split" | "pane.setSplitRatio" | "pane.close" | "pane.focus"
         | "notify.send" => dispatch(request, ctx.registry),
 
         // Session commands
@@ -1623,6 +1682,45 @@ fn handle_pane_split(
             ProtocolError::new(
                 ErrorCode::Conflict,
                 format!("Pane ID already exists: {new_pane_id}"),
+            ),
+        ),
+        Err(e) => ResponseEnvelope::error(
+            request.id(),
+            ProtocolError::new(ErrorCode::InternalError, format!("{e:?}")),
+        ),
+    }
+}
+
+fn handle_pane_set_split_ratio(
+    request: &RequestEnvelope,
+    registry: &mut WorkspaceRegistry,
+) -> ResponseEnvelope {
+    let p = request.payload();
+    let workspace_id = p["workspaceId"].as_str().unwrap_or_default();
+    let split_id = p["splitId"].as_str().unwrap_or_default();
+    let ratio = p["ratio"].as_f64().unwrap_or(0.5);
+
+    match registry.set_split_ratio(workspace_id, split_id, ratio) {
+        Ok(()) => ResponseEnvelope::success(
+            request.id(),
+            serde_json::json!({ "workspaceId": workspace_id, "splitId": split_id, "ratio": ratio }),
+        ),
+        Err(WorkspaceError::WorkspaceNotFound) => ResponseEnvelope::error(
+            request.id(),
+            ProtocolError::new(
+                ErrorCode::NotFound,
+                format!("Workspace not found: {workspace_id}"),
+            ),
+        ),
+        Err(WorkspaceError::Layout(LayoutError::SplitNotFound)) => ResponseEnvelope::error(
+            request.id(),
+            ProtocolError::new(ErrorCode::NotFound, format!("Split not found: {split_id}")),
+        ),
+        Err(WorkspaceError::Layout(LayoutError::InvalidRatio)) => ResponseEnvelope::error(
+            request.id(),
+            ProtocolError::new(
+                ErrorCode::InvalidPayload,
+                "Invalid field ratio: expected a number between 0 and 1",
             ),
         ),
         Err(e) => ResponseEnvelope::error(
@@ -1918,6 +2016,42 @@ mod handler_tests {
 
         assert!(!resp.is_ok());
         assert_eq!(resp.error().unwrap().code, ErrorCode::NotFound);
+    }
+
+    #[test]
+    fn pane_set_split_ratio_updates_the_matching_split() {
+        let mut reg = inbox_registry();
+        let split = RequestEnvelope::new(
+            "r7d-setup",
+            "pane.split",
+            json!({
+                "workspaceId": "ws-inbox",
+                "paneId": "pane-1",
+                "newPaneId": "pane-2",
+                "orientation": "vertical",
+                "ratio": 0.5
+            }),
+        );
+        dispatch(&split, &mut reg);
+
+        let req = RequestEnvelope::new(
+            "r7d-ratio",
+            "pane.setSplitRatio",
+            json!({
+                "workspaceId": "ws-inbox",
+                "splitId": "pane-1",
+                "ratio": 0.35
+            }),
+        );
+        let resp = dispatch(&req, &mut reg);
+
+        assert!(resp.is_ok());
+        match reg.list()[0].layout.root() {
+            core_layout::LayoutNode::Split { ratio, .. } => {
+                assert!((*ratio - 0.35).abs() < f64::EPSILON)
+            }
+            _ => panic!("root should remain split"),
+        }
     }
 
     #[test]

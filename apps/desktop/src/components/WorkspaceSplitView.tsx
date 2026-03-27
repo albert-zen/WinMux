@@ -23,6 +23,9 @@ interface Props {
   onFocusPane: (paneId: string) => void;
   onClosePane: (paneId: string) => void;
   onRestartPane: (paneId: string) => void;
+  onResizeSplit?: (splitId: string, ratio: number) => void;
+  focusRequestToken?: number;
+  splitErrorToken?: number;
   paneErrors?: Record<string, string>;
   onDismissPaneError?: (paneId: string) => void;
 }
@@ -35,6 +38,9 @@ interface LayoutNodeViewProps {
   onFocusPane: (paneId: string) => void;
   onClosePane: (paneId: string) => void;
   onRestartPane: (paneId: string) => void;
+  onResizeSplit?: (splitId: string, ratio: number) => void;
+  focusRequestToken?: number;
+  splitErrorToken?: number;
   paneErrors: Record<string, string>;
   onDismissPaneError?: (paneId: string) => void;
   ratioOverrides: Record<string, number>;
@@ -52,6 +58,7 @@ interface PaneViewProps {
   onFocusPane: (paneId: string) => void;
   onClosePane: (paneId: string) => void;
   onRestartPane: (paneId: string) => void;
+  focusRequestToken?: number;
   paneError?: string;
   onDismissPaneError?: () => void;
 }
@@ -68,6 +75,17 @@ function firstLeafId(node: LayoutNode): string {
   return firstLeafId(node.first);
 }
 
+function collectSplitRatios(node: LayoutNode, ratios: Record<string, number> = {}) {
+  if (node.type === "pane") {
+    return ratios;
+  }
+
+  ratios[firstLeafId(node.first)] = node.ratio;
+  collectSplitRatios(node.first, ratios);
+  collectSplitRatios(node.second, ratios);
+  return ratios;
+}
+
 function readPaneStatusMessage(pane: PaneState): string | null {
   const candidate = (pane as PaneState & { statusMessage?: unknown }).statusMessage;
   return typeof candidate === "string" && candidate.trim().length > 0 ? candidate : null;
@@ -79,11 +97,49 @@ export function WorkspaceSplitView({
   onFocusPane,
   onClosePane,
   onRestartPane,
+  onResizeSplit,
+  focusRequestToken,
+  splitErrorToken,
   paneErrors = {},
   onDismissPaneError,
 }: Props) {
   const { layout, paneStates, focusedPaneId } = workspace;
   const [ratioOverrides, setRatioOverrides] = useState<Record<string, number>>({});
+  const lastLayoutRatiosRef = useRef<Record<string, number>>(collectSplitRatios(layout));
+
+  useEffect(() => {
+    const nextLayoutRatios = collectSplitRatios(layout);
+    setRatioOverrides((prev) => {
+      const nextOverrides = Object.fromEntries(
+        Object.entries(prev).filter(([splitId, ratio]) => {
+          const nextLayoutRatio = nextLayoutRatios[splitId];
+          const prevLayoutRatio = lastLayoutRatiosRef.current[splitId];
+          if (nextLayoutRatio === undefined) {
+            return false;
+          }
+          if (Math.abs(nextLayoutRatio - ratio) < Number.EPSILON) {
+            return false;
+          }
+          if (
+            prevLayoutRatio !== undefined &&
+            Math.abs(nextLayoutRatio - prevLayoutRatio) > Number.EPSILON
+          ) {
+            return false;
+          }
+          return true;
+        }),
+      );
+      const changed =
+        Object.keys(nextOverrides).length !== Object.keys(prev).length ||
+        Object.keys(nextOverrides).some((key) => !(key in prev) || prev[key] !== nextOverrides[key]);
+      return changed ? nextOverrides : prev;
+    });
+    lastLayoutRatiosRef.current = nextLayoutRatios;
+  }, [layout]);
+
+  useEffect(() => {
+    setRatioOverrides({});
+  }, [splitErrorToken]);
 
   return (
     <div
@@ -99,6 +155,9 @@ export function WorkspaceSplitView({
         onFocusPane={onFocusPane}
         onClosePane={onClosePane}
         onRestartPane={onRestartPane}
+        onResizeSplit={onResizeSplit}
+        focusRequestToken={focusRequestToken}
+        splitErrorToken={splitErrorToken}
         paneErrors={paneErrors}
         onDismissPaneError={onDismissPaneError}
         ratioOverrides={ratioOverrides}
@@ -116,6 +175,9 @@ function LayoutNodeView({
   onFocusPane,
   onClosePane,
   onRestartPane,
+  onResizeSplit,
+  focusRequestToken,
+  splitErrorToken,
   paneErrors,
   onDismissPaneError,
   ratioOverrides,
@@ -135,6 +197,7 @@ function LayoutNodeView({
         onFocusPane={onFocusPane}
         onClosePane={onClosePane}
         onRestartPane={onRestartPane}
+        focusRequestToken={focusRequestToken}
         paneError={paneErrors[node.paneId]}
         onDismissPaneError={
           onDismissPaneError ? () => onDismissPaneError(node.paneId) : undefined
@@ -152,6 +215,9 @@ function LayoutNodeView({
       onFocusPane={onFocusPane}
       onClosePane={onClosePane}
       onRestartPane={onRestartPane}
+      onResizeSplit={onResizeSplit}
+      focusRequestToken={focusRequestToken}
+      splitErrorToken={splitErrorToken}
       paneErrors={paneErrors}
       onDismissPaneError={onDismissPaneError}
       ratioOverrides={ratioOverrides}
@@ -168,6 +234,9 @@ function SplitNodeView({
   onFocusPane,
   onClosePane,
   onRestartPane,
+  onResizeSplit,
+  focusRequestToken,
+  splitErrorToken,
   paneErrors,
   onDismissPaneError,
   ratioOverrides,
@@ -211,6 +280,8 @@ function SplitNodeView({
 
     const rect = container.getBoundingClientRect();
     const totalSize = isVertical ? rect.width - HANDLE_PX : rect.height - HANDLE_PX;
+    let latestRatio = ratio;
+    let shouldCommit = false;
     const onMouseMove = (moveEvent: MouseEvent) => {
       const currentPos = isVertical ? moveEvent.clientX : moveEvent.clientY;
       const containerStart = isVertical ? rect.left : rect.top;
@@ -219,20 +290,36 @@ function SplitNodeView({
         MAX_RATIO,
         Math.max(MIN_RATIO, offset / (totalSize + HANDLE_PX)),
       );
+      latestRatio = newRatio;
+      shouldCommit = true;
       setRatioOverrides((prev) => ({ ...prev, [key]: newRatio }));
     };
-    const cleanup = () => {
+    const cleanup = (commitRatio: boolean) => {
       window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", cleanup);
-      if (dragCleanupRef.current === cleanup) {
+      window.removeEventListener("mouseup", commitOnMouseUp);
+      if (commitRatio && shouldCommit) {
+        onResizeSplit?.(key, latestRatio);
+      } else {
+        setRatioOverrides((prev) => {
+          if (!(key in prev)) {
+            return prev;
+          }
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+      }
+      if (dragCleanupRef.current === cancelDrag) {
         dragCleanupRef.current = null;
       }
     };
+    const commitOnMouseUp = () => cleanup(true);
+    const cancelDrag = () => cleanup(false);
 
     dragCleanupRef.current?.();
-    dragCleanupRef.current = cleanup;
+    dragCleanupRef.current = cancelDrag;
     window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", cleanup);
+    window.addEventListener("mouseup", commitOnMouseUp);
   };
 
   return (
@@ -249,6 +336,9 @@ function SplitNodeView({
         onFocusPane={onFocusPane}
         onClosePane={onClosePane}
         onRestartPane={onRestartPane}
+        onResizeSplit={onResizeSplit}
+        focusRequestToken={focusRequestToken}
+        splitErrorToken={splitErrorToken}
         paneErrors={paneErrors}
         onDismissPaneError={onDismissPaneError}
         ratioOverrides={ratioOverrides}
@@ -267,6 +357,9 @@ function SplitNodeView({
         onFocusPane={onFocusPane}
         onClosePane={onClosePane}
         onRestartPane={onRestartPane}
+        onResizeSplit={onResizeSplit}
+        focusRequestToken={focusRequestToken}
+        splitErrorToken={splitErrorToken}
         paneErrors={paneErrors}
         onDismissPaneError={onDismissPaneError}
         ratioOverrides={ratioOverrides}
@@ -283,6 +376,7 @@ function PaneView({
   onFocusPane,
   onClosePane,
   onRestartPane,
+  focusRequestToken,
   paneError,
   onDismissPaneError,
 }: PaneViewProps) {
@@ -375,7 +469,12 @@ function PaneView({
         </div>
       ) : null}
 
-      <PaneTerminal pane={pane} isFocused={isFocused} theme={activeTheme} />
+      <PaneTerminal
+        pane={pane}
+        isFocused={isFocused}
+        theme={activeTheme}
+        focusRequestToken={focusRequestToken}
+      />
     </div>
   );
 }

@@ -12,6 +12,7 @@ interface Props {
   error: string | null;
   defaultRootDir: string;
   defaultShellProfile: string;
+  defaultName?: string;
 }
 
 const SHELL_PRESETS = ["cmd.exe", "pwsh", "bash"] as const;
@@ -50,8 +51,9 @@ export function CreateWorkspaceModal({
   error,
   defaultRootDir,
   defaultShellProfile,
+  defaultName,
 }: Props) {
-  const [name, setName] = useState(() => suggestWorkspaceName(defaultRootDir));
+  const [name, setName] = useState(() => defaultName ?? suggestWorkspaceName(defaultRootDir));
   const [rootDir, setRootDir] = useState(defaultRootDir);
   const [shellMode, setShellMode] = useState<ShellMode>(() => getShellMode(defaultShellProfile));
   const [customShellProfile, setCustomShellProfile] = useState(() =>
@@ -67,13 +69,13 @@ export function CreateWorkspaceModal({
     }
 
     setRootDir(defaultRootDir);
-    setName(suggestWorkspaceName(defaultRootDir));
-    setHasManualName(false);
+    setName(defaultName ?? suggestWorkspaceName(defaultRootDir));
+    setHasManualName(Boolean(defaultName?.trim()));
     setShellMode(getShellMode(defaultShellProfile));
     setCustomShellProfile(getShellMode(defaultShellProfile) === "custom" ? defaultShellProfile : "");
     setValidationError(null);
     setIsSubmitting(false);
-  }, [defaultRootDir, defaultShellProfile, isOpen]);
+  }, [defaultName, defaultRootDir, defaultShellProfile, isOpen]);
 
   const resolvedShellProfile = shellMode === "custom" ? customShellProfile : shellMode;
 

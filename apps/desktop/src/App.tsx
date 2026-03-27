@@ -15,6 +15,7 @@ import { useWorkspaceMru } from "./hooks/useWorkspaceMru";
 import {
   paneClose,
   paneFocus,
+  paneResizeSplit,
   paneSplit,
   sessionRestart,
   setActiveWorkspace,
@@ -48,18 +49,23 @@ function getPaneErrorKey(workspaceId: string, paneId: string): string {
   return `${workspaceId}:${paneId}`;
 }
 
+function isPathLikeQuery(query: string): boolean {
+  return /[\\/]|:/.test(query);
+}
+
 function App() {
   const { state, error } = useDesktopState();
   const { mru, touchWorkspace, removeWorkspace, getNextInMru, getPreviousInMru } =
     useWorkspaceMru();
   const [pendingWorkspace, setPendingWorkspace] = useState<WorkspaceState | null>(null);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
-  const [focusNonce, setFocusNonce] = useState(0);
+  const [focusRequestToken, setFocusRequestToken] = useState(0);
   const [workspaceErrors, setWorkspaceErrors] = useState<WorkspaceErrors>({
     split: null,
     workspaceClose: null,
   });
   const [createError, setCreateError] = useState<string | null>(null);
+  const [splitErrorToken, setSplitErrorToken] = useState(0);
   const [renameError, setRenameError] = useState<string | null>(null);
   const [isRenameMode, setIsRenameMode] = useState(false);
   const [renameDraft, setRenameDraft] = useState("");
@@ -69,6 +75,10 @@ function App() {
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isQuickSwitcherOpen, setIsQuickSwitcherOpen] = useState(false);
+  const [createModalDefaults, setCreateModalDefaults] = useState<{
+    rootDir?: string;
+    name?: string;
+  } | null>(null);
   const [isSidebarResizing, setIsSidebarResizing] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     if (typeof window === "undefined") {
@@ -150,7 +160,7 @@ function App() {
 
   useEffect(() => {
     setBannerDismissed(false);
-  }, [error]);
+  }, [error, state?.restoreIssue]);
 
   const handleSidebarResizeStart = useCallback(
     (event: ReactMouseEvent) => {
@@ -178,6 +188,12 @@ function App() {
 
   const notificationCounts = Object.fromEntries(
     workspaces.map((workspace) => [workspace.id, workspace.unreadNotificationCount ?? 0]),
+  );
+  const issueCounts = Object.fromEntries(
+    workspaces.map((entry) => [
+      entry.id,
+      Object.values(entry.paneStates).filter((pane) => Boolean(pane.statusMessage)).length,
+    ]),
   );
 
   const workspace =
@@ -234,6 +250,7 @@ function App() {
     setRenameDraft(workspace?.name ?? "");
     setRenameError(null);
     setIsRenamingWorkspace(false);
+    requestTerminalFocus();
   }, [workspace]);
 
   const clearPaneError = (workspaceId: string, paneId: string) => {
@@ -266,9 +283,9 @@ function App() {
     });
   };
 
-  const bumpFocusNonce = () => {
-    setFocusNonce((prev) => prev + 1);
-  };
+  const requestTerminalFocus = useCallback(() => {
+    setFocusRequestToken((prev) => prev + 1);
+  }, []);
 
   const handleWorkspaceSelect = useCallback(
     (workspaceId: string) => {
@@ -317,10 +334,13 @@ function App() {
       });
       setActiveWorkspaceId(result.workspaceId);
       touchWorkspace(result.workspaceId);
-      bumpFocusNonce();
+      requestTerminalFocus();
       setIsCreateModalOpen(false);
+      setCreateModalDefaults(null);
     } catch (reason) {
-      setCreateError(reason instanceof Error ? reason.message : String(reason));
+      const message = reason instanceof Error ? reason.message : String(reason);
+      setCreateError(message);
+      throw new Error(message);
     }
   };
 
@@ -345,7 +365,7 @@ function App() {
         const remaining = workspaces.filter((entry) => entry.id !== workspaceId);
         setActiveWorkspaceId(remaining[0]?.id ?? null);
         if (remaining[0]) {
-          bumpFocusNonce();
+          requestTerminalFocus();
         }
       }
     } catch (reason) {
@@ -492,6 +512,33 @@ function App() {
     void navigator.clipboard.writeText(workspace.rootDir);
   }, [workspace]);
 
+  const handleOpenCreateModal = useCallback(() => {
+    setCreateError(null);
+    setCreateModalDefaults(null);
+    setIsCreateModalOpen(true);
+  }, []);
+
+  const handleCreateFromQuery = useCallback((query: string) => {
+    const trimmed = query.trim();
+    setCreateError(null);
+    if (!trimmed) {
+      setCreateModalDefaults(null);
+    } else if (isPathLikeQuery(trimmed)) {
+      setCreateModalDefaults({ rootDir: trimmed });
+    } else {
+      setCreateModalDefaults({ name: trimmed });
+    }
+    quickSwitcherReturnFocusRef.current = null;
+    setIsQuickSwitcherOpen(false);
+    setIsCreateModalOpen(true);
+  }, []);
+
+  const handleCreateModalClose = useCallback(() => {
+    setCreateError(null);
+    setIsCreateModalOpen(false);
+    setCreateModalDefaults(null);
+  }, []);
+
   const handleRenameSubmit = useCallback(
     async (event?: React.FormEvent<HTMLFormElement>) => {
       event?.preventDefault();
@@ -515,6 +562,7 @@ function App() {
       try {
         await workspaceRename(workspace.id, trimmedName);
         setIsRenameMode(false);
+        requestTerminalFocus();
       } catch (reason) {
         setRenameError(reason instanceof Error ? reason.message : String(reason));
       } finally {
@@ -538,6 +586,7 @@ function App() {
     const returnFocusElement = quickSwitcherReturnFocusRef.current;
     quickSwitcherReturnFocusRef.current = null;
     if (!returnFocusElement?.isConnected) {
+      requestTerminalFocus();
       return;
     }
 
@@ -558,7 +607,7 @@ function App() {
     }
 
     restoreFocus();
-  }, []);
+  }, [requestTerminalFocus]);
 
   const handleCloseFocusedPane = useCallback(() => {
     if (!workspace) {
@@ -579,7 +628,7 @@ function App() {
     onSplitVertical: () => handleSplit("vertical"),
     onSplitHorizontal: () => handleSplit("horizontal"),
     onCloseFocusedPane: handleCloseFocusedPane,
-    onNewWorkspace: () => setIsCreateModalOpen(true),
+    onNewWorkspace: handleOpenCreateModal,
     onWorkspaceJump: handleWorkspaceJump,
     onWorkspaceCycle: handleWorkspaceCycle,
     onOpenQuickSwitcher: handleOpenQuickSwitcher,
@@ -588,7 +637,8 @@ function App() {
 
   const totalNotifications = Object.values(notificationCounts).reduce((sum, count) => sum + count, 0);
   const lastWorkspace = workspaces[workspaces.length - 1];
-  const defaultRootDir = lastWorkspace?.rootDir ?? "D:\\dev\\workspace";
+  const defaultRootDir = createModalDefaults?.rootDir ?? lastWorkspace?.rootDir ?? "D:\\dev\\workspace";
+  const defaultName = createModalDefaults?.name;
   const defaultShellProfile = lastWorkspace?.shellProfile ?? "cmd.exe";
   const workspaceFeedback = [
     {
@@ -602,13 +652,14 @@ function App() {
       dismissLabel: "Dismiss workspace close error",
     },
   ].filter((entry) => Boolean(entry.message));
-  const showBanner = Boolean(error) && !bannerDismissed;
+  const bannerMessage = error ?? state?.restoreIssue ?? null;
+  const showBanner = Boolean(bannerMessage) && !bannerDismissed;
 
   return (
     <main className="app-shell" style={shellStyle}>
       {showBanner ? (
         <div className="error-banner" role="alert">
-          <span>{error}</span>
+          <span>{bannerMessage}</span>
           <button
             type="button"
             aria-label="Dismiss error"
@@ -624,8 +675,9 @@ function App() {
         workspaces={workspaces}
         activeWorkspaceId={activeWorkspaceId}
         onSelectWorkspace={handleWorkspaceSelect}
-        onNewWorkspace={() => setIsCreateModalOpen(true)}
+        onNewWorkspace={handleOpenCreateModal}
         notificationCounts={notificationCounts}
+        issueCounts={issueCounts}
       />
       <div
         aria-label="Resize sidebar"
@@ -742,12 +794,22 @@ function App() {
 
         {workspace ? (
           <WorkspaceSplitView
-            key={`${workspace.id}:${focusNonce}`}
             workspace={workspace}
             activeTheme={state?.activeTheme}
             onFocusPane={handleFocus}
             onClosePane={handleClosePane}
             onRestartPane={handleRestartPane}
+            onResizeSplit={(splitId, ratio) => {
+              void paneResizeSplit(workspace.id, splitId, ratio).catch((reason) => {
+                setWorkspaceErrors((prev) => ({
+                  ...prev,
+                  split: reason instanceof Error ? reason.message : String(reason),
+                }));
+                setSplitErrorToken((prev) => prev + 1);
+              });
+            }}
+            focusRequestToken={focusRequestToken}
+            splitErrorToken={splitErrorToken}
             paneErrors={activePaneErrors}
             onDismissPaneError={handleDismissPaneError}
           />
@@ -772,14 +834,16 @@ function App() {
         mru={mru}
         activeWorkspaceId={activeWorkspaceId}
         onSelect={handleWorkspaceSelect}
+        onCreateFromQuery={handleCreateFromQuery}
         onClose={handleQuickSwitcherClose}
       />
 
       <CreateWorkspaceModal
         isOpen={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
+        onClose={handleCreateModalClose}
         onCreate={handleCreateWorkspace}
         error={createError}
+        defaultName={defaultName}
         defaultRootDir={defaultRootDir}
         defaultShellProfile={defaultShellProfile}
       />

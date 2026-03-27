@@ -225,6 +225,21 @@ describe("PaneTerminal", () => {
     expect(terminals[0].focus).toHaveBeenCalledTimes(1);
   });
 
+  it("re-focuses the current terminal when the focus request token changes", () => {
+    const view = render(
+      <PaneTerminal pane={makePane()} isFocused focusRequestToken={0} />,
+    );
+
+    expect(terminals[0].focus).toHaveBeenCalledTimes(1);
+
+    view.rerender(
+      <PaneTerminal pane={makePane()} isFocused focusRequestToken={1} />,
+    );
+
+    expect(createTerminalAdapter).toHaveBeenCalledTimes(1);
+    expect(terminals[0].focus).toHaveBeenCalledTimes(2);
+  });
+
   it("stops forwarding input after a running pane transitions to exited", () => {
     const view = render(<PaneTerminal pane={makePane()} isFocused={false} />);
 
