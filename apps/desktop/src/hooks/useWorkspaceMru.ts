@@ -28,6 +28,9 @@ export function useWorkspaceMru() {
 
   const touchWorkspace = useCallback((workspaceId: string) => {
     setMru((prev) => {
+      if (prev[0] === workspaceId) {
+        return prev;
+      }
       const filtered = prev.filter((id) => id !== workspaceId);
       return [workspaceId, ...filtered];
     });

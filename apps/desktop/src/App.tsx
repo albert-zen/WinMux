@@ -201,10 +201,10 @@ function App() {
   }, [isRenameMode, workspace]);
 
   useEffect(() => {
-    if (workspace) {
+    if (workspace?.id) {
       touchWorkspace(workspace.id);
     }
-  }, [touchWorkspace, workspace]);
+  }, [touchWorkspace, workspace?.id]);
 
   useEffect(() => {
     const validIds = new Set(workspaces.map((entry) => entry.id));

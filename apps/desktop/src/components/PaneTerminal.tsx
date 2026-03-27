@@ -89,7 +89,7 @@ export function PaneTerminal({ pane, isFocused, theme }: Props) {
       terminal.dispose();
       terminalRef.current = null;
     };
-  }, [pane.sessionId, theme]);
+  }, [pane.sessionId]);
 
   // Update theme when it changes (without recreating terminal)
   useEffect(() => {

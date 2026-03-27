@@ -58,6 +58,23 @@ describe("useWorkspaceMru", () => {
     expect(result.current.mru).toEqual(["ws-1", "ws-3", "ws-2"]);
   });
 
+  it("does not allocate a new MRU state when the front workspace is touched again", () => {
+    const { result } = renderHook(() => useWorkspaceMru());
+
+    act(() => {
+      result.current.touchWorkspace("ws-1");
+    });
+
+    const snapshot = result.current.mru;
+
+    act(() => {
+      result.current.touchWorkspace("ws-1");
+    });
+
+    expect(result.current.mru).toBe(snapshot);
+    expect(result.current.mru).toEqual(["ws-1"]);
+  });
+
   it("persists MRU to localStorage", () => {
     const { result } = renderHook(() => useWorkspaceMru());
 

@@ -1,6 +1,6 @@
 import { render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PaneState } from "@cmux-win/protocol";
+import type { ActiveThemeState, PaneState } from "@cmux-win/protocol";
 import { PaneTerminal } from "./PaneTerminal";
 import { createTerminalAdapter } from "../lib/terminalAdapter";
 import { sessionResize, sessionSendInput } from "../lib/desktopClient";
@@ -33,6 +33,18 @@ function makePane(overrides: Partial<PaneState> = {}): PaneState {
     status: "running",
     output: "hello",
     statusMessage: null,
+    ...overrides,
+  };
+}
+
+function makeTheme(overrides: Partial<ActiveThemeState> = {}): ActiveThemeState {
+  return {
+    id: "dark",
+    name: "Dark",
+    foreground: "#d4d4d4",
+    background: "#1e1e1e",
+    cursor: "#aeafad",
+    selection: "#264f78",
     ...overrides,
   };
 }
@@ -183,6 +195,26 @@ describe("PaneTerminal", () => {
     expect(createTerminalAdapter).toHaveBeenCalledTimes(2);
     expect(terminals[0].dispose).toHaveBeenCalledTimes(1);
     expect(terminals[1].write).toHaveBeenCalledWith("fresh output");
+  });
+
+  it("updates the theme without recreating the terminal instance", () => {
+    const view = render(
+      <PaneTerminal pane={makePane()} isFocused={false} theme={makeTheme()} />,
+    );
+
+    view.rerender(
+      <PaneTerminal
+        pane={makePane()}
+        isFocused={false}
+        theme={makeTheme({ background: "#101010" })}
+      />,
+    );
+
+    expect(createTerminalAdapter).toHaveBeenCalledTimes(1);
+    expect(terminals[0].dispose).not.toHaveBeenCalled();
+    expect(terminals[0].updateTheme).toHaveBeenLastCalledWith(
+      expect.objectContaining({ background: "#101010" }),
+    );
   });
 
   it("focuses the terminal when a pane becomes focused later", () => {
