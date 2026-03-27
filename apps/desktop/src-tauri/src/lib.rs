@@ -1,4 +1,3 @@
-use std::process::Command;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicU64, Ordering},
@@ -17,6 +16,7 @@ use core_session::{
 };
 use core_state::{DesktopBootstrap, WorkspaceRegistry, APP_NAME, STARTER_WORKSPACE_NAME};
 use core_theme::ThemeRegistry;
+use rfd::FileDialog;
 use serde::Serialize;
 use serde_json::{Value, json};
 use tauri::Emitter;
@@ -373,67 +373,29 @@ fn workspace_create(
     }
 }
 
-#[cfg(target_os = "windows")]
-fn escape_powershell_single_quoted(value: &str) -> String {
-    value.replace('\'', "''")
-}
-
 #[tauri::command]
 fn pick_workspace_directory(default_path: Option<String>) -> Result<Option<String>, String> {
-    #[cfg(target_os = "windows")]
-    {
-        let selected_path = default_path.unwrap_or_default();
-        let escaped_path = escape_powershell_single_quoted(&selected_path);
-        let script = format!(
-            concat!(
-                "$ErrorActionPreference='Stop'; ",
-                "Add-Type -AssemblyName System.Windows.Forms; ",
-                "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog; ",
-                "$dialog.ShowNewFolderButton = $false; ",
-                "$dialog.Description = 'Select workspace folder'; ",
-                "if ('{}' -ne '') {{ $dialog.SelectedPath = '{}' }}; ",
-                "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{ ",
-                "[Console]::Out.Write($dialog.SelectedPath) ",
-                "}}"
-            ),
-            escaped_path, escaped_path,
-        );
+    let mut dialog = FileDialog::new().set_title("Select workspace folder");
 
-        let output = Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-Sta",
-                "-WindowStyle",
-                "Hidden",
-                "-Command",
-                &script,
-            ])
-            .output()
-            .map_err(|error| error.to_string())?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            return Err(if stderr.is_empty() {
-                "folder picker failed".to_string()
+    if let Some(default_path) = default_path.as_deref() {
+        let trimmed = default_path.trim();
+        if !trimmed.is_empty() {
+            let path = Path::new(trimmed);
+            let initial_dir = if path.is_dir() {
+                Some(path)
             } else {
-                stderr
-            });
-        }
+                path.parent().filter(|parent| parent.is_dir())
+            };
 
-        let picked_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if picked_path.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(picked_path))
+            if let Some(initial_dir) = initial_dir {
+                dialog = dialog.set_directory(initial_dir);
+            }
         }
     }
 
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = default_path;
-        Err("native folder picking is only available on Windows".to_string())
-    }
+    Ok(dialog
+        .pick_folder()
+        .map(|picked_path| picked_path.to_string_lossy().into_owned()))
 }
 
 #[tauri::command]

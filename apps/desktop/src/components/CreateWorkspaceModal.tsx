@@ -17,6 +17,7 @@ interface Props {
 const SHELL_PRESETS = ["cmd.exe", "pwsh", "bash"] as const;
 type ShellPreset = (typeof SHELL_PRESETS)[number];
 type ShellMode = ShellPreset | "custom";
+const BROWSE_ERROR_MESSAGE = "Unable to open the folder picker. Enter a path manually or try again.";
 
 function suggestWorkspaceName(path: string): string {
   const trimmed = path.trim().replace(/[\\/]+$/g, "");
@@ -28,6 +29,18 @@ function getShellMode(shellProfile: string): ShellMode {
   return SHELL_PRESETS.includes(shellProfile as ShellPreset)
     ? (shellProfile as ShellPreset)
     : "custom";
+}
+
+function getBrowseErrorMessage(reason: unknown): string {
+  if (reason instanceof Error && reason.message.trim()) {
+    return reason.message;
+  }
+
+  if (typeof reason === "string" && reason.trim()) {
+    return reason;
+  }
+
+  return BROWSE_ERROR_MESSAGE;
 }
 
 export function CreateWorkspaceModal({
@@ -78,6 +91,8 @@ export function CreateWorkspaceModal({
   };
 
   const handleBrowse = async () => {
+    setValidationError(null);
+
     try {
       const selectedDir = await pickWorkspaceDirectory(rootDir.trim() || defaultRootDir);
       if (!selectedDir) {
@@ -86,7 +101,7 @@ export function CreateWorkspaceModal({
 
       handleRootDirChange(selectedDir);
     } catch (reason) {
-      setValidationError(reason instanceof Error ? reason.message : String(reason));
+      setValidationError(getBrowseErrorMessage(reason));
     }
   };
 

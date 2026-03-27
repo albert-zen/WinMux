@@ -87,6 +87,83 @@ describe("CreateWorkspaceModal", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("shows a clear local error when browsing fails", async () => {
+    const user = userEvent.setup();
+    vi.mocked(pickWorkspaceDirectory).mockRejectedValue({ code: "picker_failed" });
+
+    render(
+      <CreateWorkspaceModal
+        isOpen
+        onClose={() => {}}
+        onCreate={() => {}}
+        error={null}
+        defaultRootDir="D:\\dev\\starter"
+        defaultShellProfile="cmd.exe"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Browse" }));
+
+    expect(
+      await screen.findByText("Unable to open the folder picker. Enter a path manually or try again."),
+    ).toBeTruthy();
+  });
+
+  it("clears a previous browse error when the next browse is cancelled", async () => {
+    const user = userEvent.setup();
+    vi.mocked(pickWorkspaceDirectory)
+      .mockRejectedValueOnce({ code: "picker_failed" })
+      .mockResolvedValueOnce(null);
+
+    render(
+      <CreateWorkspaceModal
+        isOpen
+        onClose={() => {}}
+        onCreate={() => {}}
+        error={null}
+        defaultRootDir="D:\\dev\\starter"
+        defaultShellProfile="cmd.exe"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Browse" }));
+    expect(
+      await screen.findByText("Unable to open the folder picker. Enter a path manually or try again."),
+    ).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Browse" }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText("Unable to open the folder picker. Enter a path manually or try again."),
+      ).toBeNull();
+    });
+  });
+
+  it("treats cancelling the folder picker as a no-op", async () => {
+    const user = userEvent.setup();
+    vi.mocked(pickWorkspaceDirectory).mockResolvedValue(null);
+
+    render(
+      <CreateWorkspaceModal
+        isOpen
+        onClose={() => {}}
+        onCreate={() => {}}
+        error={null}
+        defaultRootDir="D:\\dev\\starter"
+        defaultShellProfile="cmd.exe"
+      />,
+    );
+
+    const directoryInput = screen.getByLabelText("Directory") as HTMLInputElement;
+    const initialDirectory = directoryInput.value;
+
+    await user.click(screen.getByRole("button", { name: "Browse" }));
+
+    expect(directoryInput.value).toBe(initialDirectory);
+    expect(screen.queryByText("Unable to open the folder picker. Enter a path manually or try again.")).toBeNull();
+  });
+
   it("shows a validation error and blocks submit when the directory is missing", async () => {
     const user = userEvent.setup();
     const onCreate = vi.fn();

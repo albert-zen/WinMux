@@ -70,18 +70,6 @@ impl LayoutNode {
         }
     }
 
-    /// Mutable in-order leaf traversal.
-    fn collect_panes_mut(&mut self) -> Vec<&mut PaneSlot> {
-        match self {
-            LayoutNode::Pane(slot) => vec![slot],
-            LayoutNode::Split { first, second, .. } => {
-                let mut panes = first.collect_panes_mut();
-                panes.extend(second.collect_panes_mut());
-                panes
-            }
-        }
-    }
-
     /// Count leaf (Pane) nodes.
     fn pane_count(&self) -> usize {
         match self {
@@ -123,14 +111,6 @@ impl LayoutNode {
             LayoutNode::Split { first, second, .. } => first
                 .find_pane_mut(pane_id)
                 .or_else(|| second.find_pane_mut(pane_id)),
-        }
-    }
-
-    /// Return the leftmost leaf.
-    fn first_pane(&self) -> &PaneSlot {
-        match self {
-            LayoutNode::Pane(slot) => slot,
-            LayoutNode::Split { first, .. } => first.first_pane(),
         }
     }
 

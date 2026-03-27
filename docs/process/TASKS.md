@@ -7,10 +7,18 @@ One lead integrator owns:
 - Architecture
 - ADRs
 - Merge sequencing
-- Final review
+- Final review after the independent review loop is complete
 - Release quality bar
 
 Subagents own bounded implementation slices with explicit tests.
+
+Default delivery model from the current repo state:
+
+1. The lead integrator runs a charter pass before coding starts.
+2. Interaction-quality work runs in parallel only when file ownership is clean.
+3. Shared contract work such as the authoritative split tree and restore schema stays serialized.
+4. Independent review loops run after green tests and before integration.
+5. The lead integrator's final review does not replace the independent review requirement for non-trivial work.
 
 ## Task Packages
 
@@ -50,6 +58,7 @@ Current status:
 - workspace registry exists
 - starter split/split/close/focus behavior exists
 - final split-tree model does not yet exist
+- the authoritative split-tree migration should run as a single-owner Wave 2 task after the current interaction wave stabilizes
 
 Deliverables:
 
@@ -292,7 +301,12 @@ Dependencies:
 
 - Package A
 
-## Recommended Order
+## Historical Greenfield Order
+
+This section is a historical build order for a greenfield repo bootstrap.
+
+When working from the current repository state, use `Recommended Order From Current State` below as
+the source of truth.
 
 1. Package A
 2. Package B, C, D in parallel
@@ -302,23 +316,48 @@ Dependencies:
 
 ## Recommended Order From Current State
 
-1. Upgrade Package B from linear pane list to a real split tree (architectural blocker)
-2. Harden Package I restore on top of that authoritative layout model
-3. Build Package E CLI binary as a thin named-pipe client
-4. Continue Package G and H after workspace switching and restore are stable
+1. Run a lead-integrator charter pass that freezes owned files, shared contracts, required tests, and merge order.
+2. Parallelize the remaining interaction-quality work where ownership is clean:
+   - `WorkspaceSpeed`: Package F workspace speed and switcher density
+   - `FeedbackAndFailureUX`: Package F plus explicitly assigned runtime/status work for failure and restore feedback
+   - `CwdAndRestoreTrust`: Package I plus explicitly assigned runtime work for cwd and restore trust
+   - `KeyboardAndFocusPolish`: Package F keyboard and focus polish only if it does not change layout contracts
+3. Integrate the Wave 1 slices together with any compatible current-model restore and hardening work, then close any remaining current-model gaps through an explicit `PostWave1Hardening` slice before Wave 2.
+4. Upgrade Package B from a linear pane list to a real split tree under a single owner.
+5. Rebuild and harden Package I restore on top of that authoritative layout model.
+6. Build Package E CLI binary after the restore and workspace contracts are stable enough to avoid churn.
+7. Continue Packages G and H after workspace switching and restore are stable.
+8. Keep Package J breadth and Package K release UX deferred from the near-term critical path.
+9. Run the final integration pass for this wave plan so docs, tests, and user-facing copy still match the implemented contracts.
+
+Wave 1 to Wave 2 gate:
+
+- do not start Package B split-tree contract work until steps 2 and 3 are merged or explicitly deferred
+- require full verification on the integrated current-model result before Wave 2 begins
+- freeze restore and layout contract ownership before Package B work starts
+
+Mapping note:
+
+- package references above indicate likely ownership roots, not permission to skip the Wave 0 slice charter
+- every parallel Wave 1 task should still be named and scoped as `FeedbackAndFailureUX`,
+  `CwdAndRestoreTrust`, `WorkspaceSpeed`, or `KeyboardAndFocusPolish` with explicit file lists
 
 ## Coding Rules For Subagents
 
 Each task prompt should include:
 
+- Externally visible behavior change
+- Non-goals
 - Exact files or module boundary to own
 - Explicit ban on unrelated edits
+- Shared contracts or dependent slices that must not be changed implicitly
 - Required tests before implementation for non-trivial behavior
 - Expected deliverable format:
   - changed files
   - tests added
   - tests run
   - remaining risks
+  - whether user-facing docs changed or still need updates
 
 ## Acceptance Rules
 
@@ -327,4 +366,10 @@ A package is accepted only if:
 - Behavior matches its scope
 - Tests prove the behavior
 - No unresolved high-signal review findings remain
-- Public interfaces are documented
+- Public interfaces are documented when they changed
+- Review loop is complete for non-trivial changes
+- `pnpm test` and `pnpm typecheck` pass when they apply to the touched package set
+- Relevant targeted Rust and frontend tests pass for the touched files
+- User-facing docs are updated when behavior changes
+- Slice evidence is attached to the handoff, PR, or integrator checkpoint
+- Shared-contract ownership and merge sequencing stayed within the charter

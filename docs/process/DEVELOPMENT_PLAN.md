@@ -82,6 +82,12 @@ The most valuable interaction work is:
 This track should be implemented before deeper visual polish and in parallel with restore/hardening
 where the file ownership is clean.
 
+Execution note:
+
+- current-model restore and hardening work should enter through the wave charters below whenever it
+  overlaps with failure feedback, cwd trust, or restore verification
+- any remaining current-model hardening work should be integrated before Wave 2 begins
+
 Progress note:
 
 - The first interaction-quality wave is largely complete.
@@ -261,6 +267,249 @@ Required tests:
 - dismissing one local error does not hide unrelated failures elsewhere
 - destructive confirmations do not appear for already exited or empty panes
 
+## Max-Coverage Execution Model
+
+The current execution model should maximize near-term roadmap coverage without letting shared
+contracts drift between parallel subagents.
+
+Near-term coverage means:
+
+- close the remaining high-value interaction work in Slices A-D
+- finish the current restore and hardening pass around the existing model
+- serialize the architectural jump to an authoritative split tree
+- rebuild restore on top of that model before reopening broader follow-on work
+
+The near-term critical path still excludes:
+
+- broad theme-import expansion
+- full Windows updater and release UX
+- sidebar breadth beyond workspace trust and visibility needs
+- large CLI expansion beyond parity needed for current workspace and pane flows
+
+### Wave 0: Integrator Charter And Contract Freeze
+
+Before any parallel coding begins, one lead integrator should define for each slice:
+
+- the externally visible behavior change
+- non-goals
+- owned files or directories
+- shared contracts and merge order
+- required tests
+- expected evidence for review and integration, documented in a task charter or equivalent handoff artifact
+
+Current default decisions for this wave:
+
+- short-term new pane cwd behavior stays `workspace.rootDir`
+- focused-pane cwd inheritance is deferred until the runtime can support it reliably
+- focus persistence should start with mutation-driven flushing
+- workspace MRU should remain frontend-local until restore semantics stabilize
+
+### Wave 1: Parallel Interaction Slice Charters
+
+These slices may run in parallel only when file ownership stays clean and shared contracts are
+stable.
+
+#### Slice W1-A: `FeedbackAndFailureUX`
+
+Goal:
+
+- unify pane-, workspace-, toolbar-, and sidebar-level failure presentation
+- add richer restore and PTY initialization copy
+- keep failures local, visible, and hard to miss
+
+Boundary:
+
+- this slice owns presentation, copy, and routing of already-defined failure states
+- cwd and restore correctness semantics remain owned by `CwdAndRestoreTrust`
+- this slice must not change startup cwd rules, restore persistence rules, or cwd-specific runtime decisions without an explicit charter override
+- shared cwd or restore status types default to `CwdAndRestoreTrust`; this slice consumes them for presentation
+- shared pane-status presentation components default to this slice unless the charter reassigns them
+
+Primary ownership:
+
+- desktop React error presentation
+- UI-facing status adapters and presentation-only view-model shaping
+- runtime-to-UI error mapping that feeds desktop surfaces without redefining cwd or restore contracts
+
+Required tests:
+
+- pane startup failure renders local status feedback
+- restore or PTY-init failure surfaces in-context without relying on console logs
+- dismissing one local error does not hide unrelated failures elsewhere
+
+Deliverable:
+
+- one bounded patch focused on failure visibility and actionable feedback
+
+#### Slice W1-B: `CwdAndRestoreTrust`
+
+Goal:
+
+- lock in `workspace.rootDir` behavior for starter, create, split, restart, and restore
+- strengthen invalid-directory surfacing and degraded-restore behavior
+- keep cwd mismatches treated as bugs
+
+Boundary:
+
+- this slice owns cwd and restore correctness semantics plus the data needed to prove them
+- presentation and copy remain in `FeedbackAndFailureUX` unless a narrow file owner is assigned in the charter
+- this slice should avoid broad shared desktop presentation rewrites outside the cwd or restore trust path
+- shared cwd or restore status types default to this slice unless the charter reassigns them
+- shared pane-status presentation components remain outside this slice unless the charter explicitly reassigns them
+
+Primary ownership:
+
+- desktop runtime startup paths
+- persistence and restore tests
+- cwd-specific state and data that feed workspace or pane-level feedback surfaces
+
+Required tests:
+
+- starter workspace sessions honor `workspace.rootDir`
+- `workspace.create` and `pane.split` honor the selected workspace directory
+- restored sessions preserve workspace root directories for relaunch
+- invalid working-directory failures surface a pane- or workspace-level error
+
+Deliverable:
+
+- one bounded patch focused on cwd trust and restore verification
+
+#### Slice W1-C: `WorkspaceSpeed`
+
+Goal:
+
+- increase workspace rail information density
+- add quick-switcher `create-and-switch` when ownership stays local to shell UI
+- add favorite or recent presentation if the rail becomes crowded
+
+Boundary:
+
+- this slice owns switcher-specific shortcuts and local selection state
+- pane-level keyboard navigation and focus contracts stay out of scope
+- if a shared global shortcut registry already has an owner in the codebase, that owner keeps it until the charter reassigns it
+- if no shared shortcut registry owner exists yet, ownership defaults to `WorkspaceSpeed` until the charter says otherwise
+
+Primary ownership:
+
+- desktop workspace rail and switcher components
+- shortcut hooks and local selection state
+- create-flow polish that stays local to switcher-driven workflows
+
+Required tests:
+
+- repeated workspace switches maintain correct MRU behavior
+- switcher-driven create success lands in the new workspace with terminal focus
+- quick actions remain visible enough that the user does not need to remember the path
+
+Deliverable:
+
+- one bounded patch focused on faster workspace switching and creation
+
+#### Slice W1-D: `KeyboardAndFocusPolish`
+
+Run this slice only if it can stay independent from split-tree contract work.
+
+Goal:
+
+- reduce extra-click focus recovery
+- add keyboard-first polish around workspace and pane movement
+- preserve terminal focus after high-frequency shell actions
+
+Primary ownership:
+
+- desktop shortcut hooks outside switcher-specific ownership
+- focus handoff logic in the current shell model
+- interaction-only focus polish that does not change authoritative layout contracts
+
+Guardrails:
+
+- pane-to-pane keyboard navigation that depends on authoritative layout waits for Wave 2
+- if a change touches split-tree contracts or shared shortcut ownership, defer it out of this slice
+- this slice should consume existing shared shortcut infrastructure rather than redefining it
+- this slice must not edit the shared shortcut registry unless the charter explicitly reassigns that ownership
+
+Required tests:
+
+- keyboard-driven focus handoff returns input to the expected terminal
+- repeated context switches do not require an extra click to resume typing
+
+Deliverable:
+
+- one bounded patch focused on no-extra-click workflows
+
+### Wave 2: Serialized Architecture Work
+
+These slices should not be fanned out broadly until shared contracts are stable.
+
+Wave 1 to Wave 2 gate:
+
+- all Wave 1 slices must be merged or explicitly deferred
+- full verification must be green on the integrated result
+- the task charter must state that no further parallel work will change layout or restore contracts during Wave 2
+
+#### Slice W2-A: `SplitTreeAuthority`
+
+Goal:
+
+- replace the current linear UI-backed pane model with an authoritative backend split tree
+- keep focus, split, close, and ratio semantics deterministic
+- preserve a clear contract between backend layout state and desktop rendering
+
+Primary ownership:
+
+- backend layout data model
+- layout command handling
+- contract tests for split-tree mutations
+
+Required tests:
+
+- split create and close cases
+- ratio normalization and persistence expectations
+- focus fallback on pane close
+- deterministic restore ordering inputs for downstream restore work
+
+Deliverable:
+
+- the authoritative split-tree contract merged before restore rebuild begins
+
+#### Slice W2-B: `RestoreRebuild`
+
+This slice starts only after `SplitTreeAuthority` lands.
+
+Goal:
+
+- rebuild restore on the authoritative split-tree model
+- preserve ordering, focused pane semantics, and safe degradation on corrupt state
+- keep restore wording aligned with relaunch semantics rather than process continuation
+
+Primary ownership:
+
+- snapshot serialization and validation
+- startup restore ordering
+- focused pane and launch-context restore behavior
+
+Required tests:
+
+- snapshot round trip with multiple workspaces and panes
+- partial corruption fallback
+- focused pane restoration on restored split-tree layouts
+- degraded restore behavior when optional UI state is missing
+
+Deliverable:
+
+- restore behavior that matches the authoritative layout contract and degrades safely
+
+### Wave 3: Hardening And Final Fit
+
+After Waves 1 and 2 integrate:
+
+- rerun the remaining restore and hardening gaps
+- close residual PTY and runtime failure-surfacing gaps
+- verify docs and user-facing copy still match actual restore semantics
+- reopen follow-on package work only after the new contracts are stable
+
+Wave 3 is the final integration gate for this plan, not optional cleanup.
+
 ## Immediate Priorities
 
 ### Slice 1: Replace `pre` Output With xterm.js
@@ -308,6 +557,11 @@ What remains in this slice:
 - Move from a linear UI-only split model to a backend-backed split tree.
 - Persist or restore pane ratios across app relaunch and workspace restore.
 - Add keyboard-driven pane navigation once workspace chrome exists.
+
+Execution note:
+
+- Contract-independent focus polish may ship in `Slice W1-D: KeyboardAndFocusPolish`.
+- Authoritative split-tree work, persisted ratios, and contract-level pane navigation stay in Wave 2.
 
 Exit criteria:
 
@@ -396,69 +650,77 @@ What remains in this slice:
 
 - preserve and restore richer workspace-level UI state
 - harden pane id generation against restored custom pane ids
-- decide whether focused-pane persistence should flush immediately or be batched/debounced
+- apply mutation-driven focus persistence first and revisit batching only if evidence shows it is needed
 - add stronger PTY failure surfacing in the desktop shell
 - surface per-pane session startup/runtime failures directly in the desktop UI
-- define whether focus persistence is mutation-driven, timer-driven, or shutdown-only
-- decide whether workspace MRU should stay purely frontend-local or gain persisted restore semantics later
+- keep workspace MRU frontend-local for now and revisit persisted restore semantics after restore contracts stabilize
+
+Execution note:
+
+- work from this slice should now be scheduled either through `Slice W1-A: FeedbackAndFailureUX`,
+  `Slice W1-B: CwdAndRestoreTrust`, or an explicit `PostWave1Hardening` slice owned by the
+  integrator
 
 ## Parallelization Plan
 
-The next work should be split into bounded streams:
+The next work should be split into bounded streams that match the execution waves above.
 
-### Stream A: Terminal Surface
+### Wave 0 Rule
 
-Owns:
+- do not parallelize coding until the lead integrator freezes slice boundaries
+- shared contracts need a named owner before implementation starts
 
-- `xterm.js` integration
-- terminal input wiring
-- terminal lifecycle cleanup
+### Wave 1 Streams
 
-### Stream B: Layout UI
+Run in parallel only when no two slices edit the same file set:
 
-Owns:
+- `FeedbackAndFailureUX` owns desktop failure presentation plus any directly supporting runtime-to-UI status mapping
+- `CwdAndRestoreTrust` owns startup cwd behavior, restore verification, and invalid-directory surfacing
+- `WorkspaceSpeed` owns desktop workspace rail, switcher, and local create-and-switch polish
+- `KeyboardAndFocusPolish` owns shortcut hooks and focus handoff logic only when it does not change layout contracts
 
-- split-pane renderer
-- focus visuals
-- pane resize wiring
+### Wave 2 Rule
 
-### Stream C: Runtime And Session Hardening
+- `SplitTreeAuthority` has a single owner and merges first
+- `RestoreRebuild` starts only after the split-tree contract is stable
+- final integration, merge ordering, and sign-off stay single-threaded
 
-Owns:
-
-- session resize correctness
-- output buffering safeguards
-- restart and restore edge cases
-
-### Stream D: Workspace Management
-
-Owns:
-
-- create/list/switch flows
-- pane close/focus runtime support
-- CLI parity
-
-Rule:
+### General Parallelism Rules
 
 - parallel coding is allowed only when file ownership is explicit
 - do not let multiple subagents edit the same file set concurrently
-
-Interaction-specific stream ownership should follow the same rule:
-
-- sidebar / switcher work owns desktop React components and shortcut hooks
-- cwd / restore work owns desktop runtime plus state persistence
-- feedback work owns protocol status shape, runtime errors, and desktop presentation
+- do not parallelize shared protocol, snapshot-schema, or state-contract edits without a single owner
+- read-only investigation and independent review can run in parallel with implementation
 
 ## TDD Expectations
 
 Each non-trivial slice should follow this order:
 
-1. define behavior with failing tests
-2. implement the smallest passing change
-3. run targeted tests
-4. run full repo verification
-5. run an independent review pass
-6. commit a git checkpoint
+1. define the externally visible behavior change and non-goals
+2. add or adjust the smallest test that proves it
+3. run the narrowest target and confirm real failure
+4. implement the smallest passing change
+5. run nearby tests that could reasonably regress
+6. refactor only while tests stay green
+7. run full repo verification before integration
+8. run an independent review pass
+9. fix only meaningful findings and re-run the smallest relevant tests
+10. commit or integrate only with the expected evidence packet
+
+Reviewers should only report:
+
+- bugs
+- regression risks
+- broken abstractions or ownership boundaries
+- missing tests likely to matter soon
+
+Required evidence for every non-trivial slice:
+
+- changed files
+- tests added
+- tests run
+- remaining risks
+- whether user-facing docs changed or still need updates
 
 Required verification before merge:
 
@@ -466,6 +728,10 @@ Required verification before merge:
 - `pnpm typecheck`
 - relevant targeted Rust tests for touched crates
 - relevant targeted frontend tests for touched UI hooks/components
+- review loop completion for non-trivial changes
+- docs updates whenever user-facing behavior changes
+- public interface documentation whenever public contracts change
+- required CI passes when the touched path already has protected-branch or release checks
 
 ## Known Risks To Watch
 
@@ -477,19 +743,19 @@ Required verification before merge:
 
 ## Recommended Next Action
 
-Continue the restore/hardening pass next:
+Run the next work in waves:
 
-- lock in tests that restored sessions continue honoring `workspace.rootDir`
-- harden pane id generation against restored layouts and custom pane ids
-- add explicit PTY/runtime error surfaces in the desktop shell
-- decide how focus persistence should flush and restore
-- then lock in tests for focus persistence and degraded restore behavior
-- then return to the larger architectural step: replacing the linear pane list with a backend split tree
+1. complete Wave 0 by freezing slice boundaries, required tests, and merge order
+2. run Wave 1 in parallel:
+   - `FeedbackAndFailureUX`
+   - `CwdAndRestoreTrust`
+   - `WorkspaceSpeed`
+   - `KeyboardAndFocusPolish` only if it stays contract-independent
+3. integrate Wave 1 together with any compatible current-model restore and hardening work, then
+   close the remaining current-model gaps before Wave 2
+4. start Wave 2 with `SplitTreeAuthority` under a single owner
+5. begin `RestoreRebuild` only after the split-tree contract lands
+6. use Wave 3 to close residual hardening gaps and verify docs, tests, and copy remain aligned
 
-After that, the next interaction-only wave should focus on:
-
-- denser workspace rail state
-- quick-switcher create-and-switch flow
-- keyboard pane navigation on top of the current layout
-
-That is now the shortest path from "roughly usable" to "trustworthy enough for daily use."
+That is now the shortest path from "roughly usable" to "trustworthy enough for daily use" while
+still covering the largest realistic portion of the remaining near-term roadmap.
