@@ -49,9 +49,9 @@ Exit criteria:
 Current progress note:
 
 - panes, focus, resize, split, close, restart, PTY, workspace management, and desktop terminal rendering are already working
-- quick switching, MRU cycling, workspace creation polish, and inline rename are already working
-- local registry persistence and startup restore are also in place
-- the final split-tree model and richer restore semantics are still the main blockers for finishing this phase
+- quick switching, MRU cycling, switcher-seeded workspace creation, denser workspace rail metadata, and inline rename are already working
+- local registry persistence, startup restore, restore issue surfacing, and persisted split ratios are also in place
+- the remaining blockers for finishing this phase are now Wave 3 hardening items rather than basic split-tree or ratio persistence work
 
 ### Phase 2: Dogfood
 
@@ -61,14 +61,14 @@ Goals:
 
 - Sidebar metadata collection
 - Notification parsing and surfacing
-- Session persistence and restore
+- Richer workspace/UI restore beyond the current contract
 - Theme switching and import support
 - Failure recovery hardening
 
 Exit criteria:
 
 - Daily-driver stable for local development sessions
-- Restart restores workspaces and layout predictably
+- Restart restores workspaces and layout predictably, including the current split ratio contract
 - Notifications work from PTY and CLI sources
 
 ### Phase 3: v0.1

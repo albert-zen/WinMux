@@ -27,10 +27,10 @@ As of the latest integration work, the project already has:
   - split the focused pane
   - focus and close panes
   - resize panes through a draggable split layout
-  - preserve split ratios across pane split/close/rerender
+  - preserve split ratios across pane split/close/rerender and persist resized ratios through restore
   - restart exited sessions
   - create, close, rename, and switch workspaces from the desktop shell
-  - quick-switch workspaces through MRU cycling and a searchable switcher
+  - quick-switch workspaces through MRU cycling, a searchable switcher, and a switcher-seeded create flow
   - restore terminal focus after workspace switching
   - create workspaces from a folder picker with shell presets and suggested names
   - rename the active workspace inline from the toolbar
@@ -38,6 +38,7 @@ As of the latest integration work, the project already has:
 - polling fallback through `desktop_state`
 - local persistence of workspace registry state to `state.json`
 - startup restore of workspace names, shell profiles, root directories, pane lists, focused pane ids, and active workspace selection
+- workspace-level restore issue surfacing when saved state degrades or restored panes cannot relaunch cleanly
 - capped PTY/session output retention so long-running sessions do not grow unbounded in memory
 - reset-aware output events so the terminal surface can recover cleanly after capped-prefix truncation
 
@@ -45,7 +46,7 @@ What this means in practice:
 
 - the backend path is real
 - the app is now a working multi-pane terminal demo
-- the remaining gaps are authoritative layout persistence, richer restore semantics, and hardening
+- the remaining gaps are richer workspace-level restore semantics, keyboard pane navigation, and final hardening
 - the next quality gains are increasingly about interaction polish, not just missing primitives
 
 ## Definition Of "Usable"
@@ -95,7 +96,7 @@ Progress note:
 
 ### Interaction Slice A: Workspace Selection Ergonomics
 
-Status: mostly completed
+Status: completed for the current shell model
 
 Problem:
 
@@ -116,13 +117,13 @@ What has landed:
 - active workspace persistence and startup restore
 - MRU switching with `Ctrl+Tab` / `Ctrl+Shift+Tab`
 - searchable quick switcher
+- denser workspace rail metadata in the current sidebar
+- switcher-seeded create flow for unmatched queries
 - terminal refocus after workspace switching
 - root-directory visibility plus open/copy path actions
 
 What remains:
 
-- increase workspace rail information density
-- consider "create and switch" behavior inside the quick switcher
 - add favorite/recent presentation if the current rail becomes crowded
 
 Exit criteria:
@@ -141,7 +142,7 @@ Required tests:
 
 ### Interaction Slice B: Workspace Creation Flow
 
-Status: mostly completed
+Status: completed for the current shell model
 
 Problem:
 
@@ -162,11 +163,11 @@ What has landed:
 - derived workspace names from the selected folder
 - shell presets plus custom shell entry
 - inline path validation before create
+- switcher-seeded create defaults for name or root directory
 - create success jumps into the new workspace and focuses its starter terminal
 
 What remains:
 
-- polish around "create from switcher" if that workflow is added later
 - optional smarter defaults seeded from recent workspace history instead of just the last active one
 
 Exit criteria:
@@ -185,7 +186,7 @@ Required tests:
 
 ### Interaction Slice C: Terminal Start And CWD Semantics
 
-Status: partially completed
+Status: mostly completed
 
 Problem:
 
@@ -206,10 +207,10 @@ What has landed:
 - starter, create, split, and restart flows now consistently target `workspace.rootDir`
 - current workspace directory is visible in the toolbar and status bar
 - invalid working directory failures surface in pane-local status feedback
+- restore fallback and relaunch failures surface through workspace-level restore feedback plus pane-local detail
 
 What remains:
 
-- restore-focused cwd verification beyond the current registry snapshot model
 - a deliberate decision on whether future panes should inherit cwd from the focused pane
 
 Exit criteria:
@@ -227,7 +228,7 @@ Required tests:
 
 ### Interaction Slice D: Safety And Feedback
 
-Status: mostly completed
+Status: completed for the current shell model
 
 Problem:
 
@@ -248,11 +249,11 @@ What has landed:
 - pane-local status and error surfaces
 - modal confirmation behavior with keyboard trap and `Escape`
 - local rename/create/split/restart feedback paths in the desktop shell
+- workspace-level restore issue banner plus richer startup and relaunch failure copy
 
 What remains:
 
-- unify the last few toolbar-level and sidebar-level failure messages
-- add richer failure copy for restore and PTY initialization problems
+- broaden failure routing only if new error classes appear outside the current pane/workspace surfaces
 
 Exit criteria:
 
@@ -543,25 +544,24 @@ Required tests:
 
 ### Slice 2: Real Split-Pane Layout And Focus
 
-Status: partially completed
+Status: completed for the current desktop/runtime contract
 
 What has landed:
 
-- The card grid was replaced with a draggable split-pane desktop layout.
+- The card grid was replaced with a backend-backed split-pane desktop layout.
 - Pane focus and close actions work end-to-end.
 - Terminal resize is wired through the existing `session.resize` path.
 - Pane widths are preserved across ordinary rerenders plus pane add/remove cases.
+- User-resized split ratios now flow through a backend-owned mutation path and persist through restore.
 
 What remains in this slice:
 
-- Move from a linear UI-only split model to a backend-backed split tree.
-- Persist or restore pane ratios across app relaunch and workspace restore.
 - Add keyboard-driven pane navigation once workspace chrome exists.
 
 Execution note:
 
-- Contract-independent focus polish may ship in `Slice W1-D: KeyboardAndFocusPolish`.
-- Authoritative split-tree work, persisted ratios, and contract-level pane navigation stay in Wave 2.
+- Contract-independent focus polish has already landed through the current shell model.
+- Future keyboard pane navigation should still wait for explicit authoritative navigation rules.
 
 Exit criteria:
 
@@ -611,7 +611,7 @@ Required tests:
 
 ### Slice 4: Restore And Hardening Pass
 
-Status: in progress
+Status: mostly completed
 
 Why this is the next "stability" milestone:
 
@@ -631,6 +631,8 @@ What has landed:
 - startup restore with safe fallback on corrupt or unsupported state
 - protocol/version validation for persisted state
 - active workspace selection restore
+- persisted split ratios through the backend-owned layout path
+- restore issue surfacing when saved state or restored pane relaunch degrades
 - capped PTY/session output retention with truncation-safe `session-output` event behavior
 
 Exit criteria:
@@ -651,8 +653,6 @@ What remains in this slice:
 - preserve and restore richer workspace-level UI state
 - harden pane id generation against restored custom pane ids
 - apply mutation-driven focus persistence first and revisit batching only if evidence shows it is needed
-- add stronger PTY failure surfacing in the desktop shell
-- surface per-pane session startup/runtime failures directly in the desktop UI
 - keep workspace MRU frontend-local for now and revisit persisted restore semantics after restore contracts stabilize
 
 Execution note:
@@ -743,19 +743,15 @@ Required verification before merge:
 
 ## Recommended Next Action
 
-Run the next work in waves:
+Wave 1 and the current Wave 2 contract work are now in place for the desktop/runtime model.
 
-1. complete Wave 0 by freezing slice boundaries, required tests, and merge order
-2. run Wave 1 in parallel:
-   - `FeedbackAndFailureUX`
-   - `CwdAndRestoreTrust`
-   - `WorkspaceSpeed`
-   - `KeyboardAndFocusPolish` only if it stays contract-independent
-3. integrate Wave 1 together with any compatible current-model restore and hardening work, then
-   close the remaining current-model gaps before Wave 2
-4. start Wave 2 with `SplitTreeAuthority` under a single owner
-5. begin `RestoreRebuild` only after the split-tree contract lands
-6. use Wave 3 to close residual hardening gaps and verify docs, tests, and copy remain aligned
+The next work should focus on Wave 3 hardening:
 
-That is now the shortest path from "roughly usable" to "trustworthy enough for daily use" while
-still covering the largest realistic portion of the remaining near-term roadmap.
+1. preserve and restore richer workspace-level UI state without weakening the current restore contract
+2. harden pane id generation and restored custom-pane handling before expanding navigation features
+3. decide whether mutation-driven focus persistence is still needed now that the no-extra-click focus fixes are in place
+4. close any residual PTY/runtime notification gaps only where the current pane/workspace feedback surfaces are not sufficient
+5. reopen keyboard pane navigation or broader sidebar density only after the hardened restore/layout contract stays stable under full verification
+
+That is now the shortest path from "trustworthy enough for daily use" to a more complete dogfood-quality
+desktop without reopening layout and restore drift too early.
